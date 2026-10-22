@@ -12,6 +12,12 @@ def set_code(phone: str):
 
     codes[phone] = code
 
+    send_code(phone, code)
+
+
+def send_code(phone: str, code: str):
+    pass
+
 
 def verify_code(phone: str, code: str) -> bool:
     if phone not in codes:
