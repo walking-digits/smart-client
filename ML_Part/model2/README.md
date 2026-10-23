@@ -47,4 +47,3 @@ curl -X POST localhost:8001/alternative -H "Content-Type: application/json" -d @
 | `model.py` | признаки, прогноз, поиск альтернативы; веса похожести `W_AMOUNT`, `W_TERM`, `W_COLL` |
 | `contract.py` | проверка запроса |
 | `artifacts/approval.txt` | обученная модель |
-| `train.py` | переобучение: `python train.py` (нужны `../data/applications.csv` и `../requirements.txt`) |

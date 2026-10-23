@@ -64,5 +64,10 @@ htmlcov/
 .cache/
 
 
-# Мок-данные: воспроизводятся командой python generate_data.py (ML_Part/README.md)
-ML_Part/data/*.csv
+# ML_Part: в git только то, на чём работают сервисы. Данные, генератор, мок, обучение — локально.
+ML_Part/*
+!ML_Part/model1/
+!ML_Part/model2/
+!ML_Part/API.md
+!ML_Part/README.md
+ML_Part/model*/train.py

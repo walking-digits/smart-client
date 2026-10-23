@@ -41,4 +41,3 @@ curl -X POST localhost:8000/offers -H "Content-Type: application/json" -d @examp
 | `model.py` | признаки и прогноз |
 | `contract.py` | проверка запроса |
 | `artifacts/` | обученные модели |
-| `train.py` | переобучение: `python train.py` (нужны `../data/applications.csv` и `../requirements.txt`) |
