@@ -18,7 +18,7 @@ sudo docker run --rm -p 8001:8000 model2
 curl -X POST localhost:8001/approval -H "Content-Type: application/json" -d @example_approval.json
 ```
 ```json
-{"approval_probability": 0.3922}
+{"approval_probability": 0.5179}
 ```
 
 ```bash
@@ -26,13 +26,16 @@ curl -X POST localhost:8001/alternative -H "Content-Type: application/json" -d @
 ```
 ```json
 {
-  "source_approval_probability": 0.3922,
-  "offer": {"product_type": "WORKING_CAPITAL", "amount": 23000000, "term_months": 12, "rate": 20.0, "collateral_value": 0},
-  "likelyhood": 0.575,
-  "approval_probability": 0.7057
+  "source_approval_probability": 0.5179,
+  "offer": {"product_type": "WORKING_CAPITAL", "amount": 30000000, "term_months": 12, "rate": 20.0,
+            "collateral_value": 0, "collateral_type": null, "collateral_subtype": null},
+  "likelyhood": 0.75,
+  "approval_probability": 0.7005
 }
 ```
 
+- Залог: `collateral_type` и `collateral_subtype` — вид залога (справочник в [../API.md](../API.md),
+  раздел 6); без залога — `null`.
 - Исходное уже проходит порог → вернётся оно, `likelyhood` = 1.
 - Подходящего нет → `"offer": null` (это не ошибка).
 - Ошибка в запросе → `422 {"error": {"code": "VALIDATION_ERROR", "message": "..."}}`.

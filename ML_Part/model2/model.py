@@ -10,7 +10,7 @@ import lightgbm as lgb
 import numpy as np
 import pandas as pd
 
-from contract import CATALOG, GOV_MICRO_MAX_TERM, PRODUCT_TYPES, SECURED_MAX_LTV
+from contract import CATALOG, COLLATERAL_TYPES, GOV_MICRO_MAX_TERM, PRODUCT_TYPES, SECURED_MAX_LTV
 
 ARTIFACTS = Path(__file__).resolve().parent / "artifacts"
 
@@ -24,6 +24,8 @@ CATEGORIES = {
     "legal_form": ["LLC", "IE"],
     "okved_section": list("ABCDEFGHIJKLMNPQRS"),
     "msp_category": ["micro", "small", "medium"],
+    "collateral_type": list(COLLATERAL_TYPES),
+    "collateral_subtype": [s for subs in COLLATERAL_TYPES.values() for s in subs],
 }
 NUMERIC = [
     "company_age_months", "revenue_last_year", "revenue_growth_yoy", "net_margin",
@@ -39,7 +41,7 @@ MONOTONE = {"amount": -1, "log_amount": -1, "amount_to_revenue": -1, "dsr": -1,
 
 
 def make_X(rows: pd.DataFrame) -> pd.DataFrame:
-    """rows — поля Company + поля Offer (из CSV или JSON). Пропуски остаются NaN."""
+    """rows — поля Company + поля Offer (из CSV или JSON). Пропуски (и вид залога без залога) остаются NaN."""
     X = rows[NUMERIC].astype(float)  # null → NaN, true/false → 1/0
     for col, cats in CATEGORIES.items():
         X[col] = pd.Categorical(rows[col], categories=cats)  # одинаковые коды категорий в обучении и в сервисе
@@ -87,7 +89,8 @@ def round2_grid(lo, hi):
 
 
 def candidates(company: dict, offer: dict) -> list:
-    """Предложения того же продукта: сумма ≤ исходной, любой допустимый срок, залог ≤ исходного, ставка та же."""
+    """Предложения того же продукта: сумма ≤ исходной, любой допустимый срок, залог ≤ исходного
+    (того же вида; без залога — вид null), ставка та же."""
     p, a0, c0 = offer["product_type"], offer["amount"], offer["collateral_value"]
     cat = CATALOG[p]
     terms = [t for t in cat["terms"]
@@ -102,8 +105,10 @@ def candidates(company: dict, offer: dict) -> list:
             for c in colls:
                 if cat["collateral"] == "secured" and a > SECURED_MAX_LTV * c:
                     continue
+                kind = {"collateral_type": offer["collateral_type"] if c else None,
+                        "collateral_subtype": offer["collateral_subtype"] if c else None}
                 out.append({"product_type": p, "amount": a, "term_months": t, "rate": offer["rate"],
-                            "collateral_value": c})
+                            "collateral_value": c, **kind})
     return out
 
 

@@ -30,6 +30,15 @@ FLOAT_FIELDS = ["revenue_growth_yoy", "net_margin", "equity_ratio", "current_rat
 BOOL_FIELDS = ["accounts_blocked_flag", "registry_risk_flag", "bankruptcy_flag"]
 NULLABLE_FIELDS = set(FLOAT_FIELDS) | {"bki_total_debt", "bki_max_dpd_12m"}
 OFFER_FIELDS = ["product_type", "amount", "term_months", "rate", "collateral_value"]
+# Вид залога: в /approval и /alternative обязательны (null без залога); /offers их не возвращает
+COLLATERAL_FIELDS = ["collateral_type", "collateral_subtype"]
+COLLATERAL_TYPES = {
+    "REAL_ESTATE": ["APARTMENT", "HOUSE", "OFFICE", "RETAIL_SPACE", "WAREHOUSE", "INDUSTRIAL_BUILDING", "LAND"],
+    "VEHICLES": ["CAR", "TRUCK", "SPECIAL_MACHINERY"],
+    "EQUIPMENT": ["PRODUCTION_EQUIPMENT", "TRADE_EQUIPMENT"],
+    "INVENTORY": ["GOODS", "RAW_MATERIALS"],
+    "FINANCIAL": ["DEPOSIT", "BONDS", "SHARES", "RECEIVABLES"],
+}
 
 # Раздел 5. collateral: "zero" — всегда 0, "any" — ≥ 0, "secured" — > 0 и amount ≤ 0.7 × collateral_value.
 # rate None — ставка фиксирована программой (GOV_RATE).
@@ -95,11 +104,13 @@ def validate_company(company) -> list[str]:
     return errors
 
 
-def validate_offer(offer, msp_category) -> list[str]:
-    """Проверка Offer по разделу 5. msp_category — из Company (лимиты GOV_1764 для micro)."""
+def validate_offer(offer, msp_category, with_collateral_type=True) -> list[str]:
+    """Проверка Offer по разделу 5. msp_category — из Company (лимиты GOV_1764 для micro).
+    with_collateral_type=False — для предложений из /offers (там вида залога нет)."""
     if not isinstance(offer, dict):
         return ["offer должен быть объектом"]
-    missing = [f"offer.{f}: нет поля" for f in OFFER_FIELDS if f not in offer]
+    fields = OFFER_FIELDS + COLLATERAL_FIELDS if with_collateral_type else OFFER_FIELDS
+    missing = [f"offer.{f}: нет поля" for f in fields if f not in offer]
     if missing:
         return missing
     p = offer["product_type"]
@@ -138,4 +149,18 @@ def validate_offer(offer, msp_category) -> list[str]:
         errors.append(f"collateral_value={coll}: у {p} залога нет, должно быть 0")
     elif c["collateral"] == "secured" and (coll == 0 or amount > SECURED_MAX_LTV * coll):
         errors.append(f"{p}: нужен залог и amount ≤ {SECURED_MAX_LTV} × collateral_value")
+    if with_collateral_type:
+        errors += validate_collateral_type(p, coll, offer["collateral_type"], offer["collateral_subtype"])
     return errors
+
+
+def validate_collateral_type(product, coll, ctype, csub) -> list[str]:
+    if coll == 0:
+        return [] if ctype is None and csub is None else ["collateral_type и collateral_subtype: без залога — null"]
+    if not isinstance(ctype, str) or ctype not in COLLATERAL_TYPES:
+        return [f"collateral_type={ctype!r} неизвестен"]
+    if csub not in COLLATERAL_TYPES[ctype]:
+        return [f"collateral_subtype={csub!r} не относится к {ctype}"]
+    if product == "SECURED_RE" and ctype != "REAL_ESTATE":
+        return ["SECURED_RE: залог — только REAL_ESTATE"]
+    return []

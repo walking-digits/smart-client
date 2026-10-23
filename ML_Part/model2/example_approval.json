@@ -26,6 +26,8 @@
     "amount": 40000000,
     "term_months": 12,
     "rate": 20.0,
-    "collateral_value": 0
+    "collateral_value": 0,
+    "collateral_type": null,
+    "collateral_subtype": null
   }
 }

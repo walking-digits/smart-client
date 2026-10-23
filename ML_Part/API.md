@@ -30,7 +30,7 @@ ML-сервисы ничего не запрашивают сами: всё ну
 
 ## 1. Данные: таблица заявок
 
-Мок-данные — `data/applications.csv`: одна строка = одна заявка компании на один продукт, 28 колонок,
+Мок-данные — `data/applications.csv`: одна строка = одна заявка компании на один продукт, 30 колонок,
 за год, по дате. У компании может быть несколько заявок, в том числе повторные на тот же продукт после
 отказа (с меньшей суммой, залогом или другим сроком). Данные компании повторяются во всех её заявках.
 Пустая ячейка = нет данных, флаги — 0/1.
@@ -74,7 +74,7 @@ pd.read_csv("data/applications.csv", dtype={"inn": str})   # иначе ИНН �
 | `bki_total_debt` | int, ₽ | остаток долга по кредитам | нет кредитной истории | БКИ |
 | `bki_max_dpd_12m` | int, дни | максимальная просрочка за 12 мес. (0 — не было) | нет кредитной истории | БКИ |
 
-### Предложение (5 колонок)
+### Предложение (7 колонок)
 
 | Колонка | Тип | Описание |
 |---|---|---|
@@ -83,6 +83,8 @@ pd.read_csv("data/applications.csv", dtype={"inn": str})   # иначе ИНН �
 | `term_months` | int | срок, мес. |
 | `rate` | float | ставка, % годовых |
 | `collateral_value` | int, ₽ | стоимость залога; 0 — без залога |
+| `collateral_type` | string | общий вид залога (раздел 6); пусто — без залога |
+| `collateral_subtype` | string | частный вид залога (раздел 6); пусто — без залога |
 
 ### Результат
 
@@ -126,7 +128,7 @@ pd.read_csv("data/applications.csv", dtype={"inn": str})   # иначе ИНН �
 
 ### `Offer` — предложение
 
-5 колонок предложения из раздела 1. Допустимые значения для каждого продукта — в разделе 5.
+7 колонок предложения из раздела 1. Допустимые значения для каждого продукта — в разделе 5.
 
 ```json
 {
@@ -134,9 +136,15 @@ pd.read_csv("data/applications.csv", dtype={"inn": str})   # иначе ИНН �
   "amount": 5000000,
   "term_months": 24,
   "rate": 20.0,
-  "collateral_value": 6000000
+  "collateral_value": 6000000,
+  "collateral_type": "REAL_ESTATE",
+  "collateral_subtype": "WAREHOUSE"
 }
 ```
+
+Вид залога: без залога (`collateral_value` = 0) — оба поля `null`; с залогом — оба обязательны,
+частный вид должен относиться к общему (раздел 6). `/offers` вид залога не предлагает: в его ответе
+`Offer` без этих двух полей, вид выбирает клиент.
 
 ---
 
@@ -196,7 +204,7 @@ pd.read_csv("data/applications.csv", dtype={"inn": str})   # иначе ИНН �
 | Поле | Тип | Описание |
 |---|---|---|
 | `offers` | array, 10 элементов | по одному на продукт, по убыванию `oftenhood` |
-| `offers[].offer` | `Offer` | предложение по продукту |
+| `offers[].offer` | `Offer` без вида залога | предложение по продукту |
 | `offers[].oftenhood` | float, 0…1 | насколько часто похожие компании хотят этот продукт |
 
 ### 4.2. `POST /approval` — шанс одобрения
@@ -207,7 +215,8 @@ pd.read_csv("data/applications.csv", dtype={"inn": str})   # иначе ИНН �
 {
   "company": { "inn": "7701234560", "legal_form": "LLC", "...": "все поля Company" },
   "offer": { "product_type": "WORKING_CAPITAL", "amount": 5000000, "term_months": 24,
-             "rate": 20.0, "collateral_value": 6000000 }
+             "rate": 20.0, "collateral_value": 6000000,
+             "collateral_type": "REAL_ESTATE", "collateral_subtype": "WAREHOUSE" }
 }
 ```
 
@@ -225,7 +234,7 @@ pd.read_csv("data/applications.csv", dtype={"inn": str})   # иначе ИНН �
 
 Возвращает одно предложение, максимально похожее на исходное, у которого шанс одобрения больше `gamma`.
 Если исходное само проходит порог — возвращается оно. Продукт (`product_type`) тот же, что в исходном;
-залог в ответе не больше исходного.
+залог в ответе не больше исходного и того же вида (или без залога).
 
 **Запрос:**
 
@@ -233,7 +242,7 @@ pd.read_csv("data/applications.csv", dtype={"inn": str})   # иначе ИНН �
 {
   "company": { "inn": "7701234560", "legal_form": "LLC", "...": "все поля Company" },
   "offer": { "product_type": "INVESTMENT", "amount": 30000000, "term_months": 36,
-             "rate": 16.0, "collateral_value": 0 },
+             "rate": 16.0, "collateral_value": 0, "collateral_type": null, "collateral_subtype": null },
   "gamma": 0.9
 }
 ```
@@ -250,7 +259,7 @@ pd.read_csv("data/applications.csv", dtype={"inn": str})   # иначе ИНН �
 {
   "source_approval_probability": 0.47,
   "offer": { "product_type": "INVESTMENT", "amount": 18000000, "term_months": 84,
-             "rate": 19.5, "collateral_value": 0 },
+             "rate": 19.5, "collateral_value": 0, "collateral_type": null, "collateral_subtype": null },
   "likelyhood": 0.74,
   "approval_probability": 0.91
 }
@@ -278,7 +287,7 @@ pd.read_csv("data/applications.csv", dtype={"inn": str})   # иначе ИНН �
 | `CREDIT_LINE_REV` | Возобновляемая кредитная линия | 500 000…60 000 000 | 12, 18, 24, 36 | 12.0…32.0 | ≥ 0 |
 | `LEASING` | Лизинг | 500 000…100 000 000 | 12, 24, 36, 48, 60 | 7.2…19.2 | всегда 0 |
 | `INVESTMENT` | Инвестиционный кредит | 1 000 000…500 000 000 | 24, 36, 60, 84, 120 | 10.8…28.8 | ≥ 0 |
-| `SECURED_RE` | Кредит под залог недвижимости | 1 000 000…150 000 000 | 36, 60, 84, 120 | 10.2…27.2 | > 0, `amount ≤ 0.7 × collateral_value` |
+| `SECURED_RE` | Кредит под залог недвижимости | 1 000 000…150 000 000 | 36, 60, 84, 120 | 10.2…27.2 | > 0, `amount ≤ 0.7 × collateral_value`, вид — `REAL_ESTATE` |
 | `GOV_1764` | Льготный кредит (программа 1764) | 500 000…500 000 000; micro до 10 000 000 | 12, 24, 36, 60; micro до 36 | 16.75; micro 17.5 | ≥ 0 |
 | `FACTORING` | Факторинг | 1 000 000…500 000 000 | 1, 2, 3, 4, 6 | 14.4…38.4 | всегда 0 |
 
@@ -296,3 +305,13 @@ pd.read_csv("data/applications.csv", dtype={"inn": str})   # иначе ИНН �
 | `LegalForm` | `LLC` (ООО), `IE` (ИП) |
 | `MspCategory` | `micro`, `small`, `medium` |
 | `OkvedSection` | `A`, `B`, `C`, `D`, `E`, `F`, `G`, `H`, `I`, `J`, `K`, `L`, `M`, `N`, `P`, `Q`, `R`, `S` |
+
+### Виды залога
+
+| `collateral_type` | `collateral_subtype` |
+|---|---|
+| `REAL_ESTATE` недвижимость | `APARTMENT` квартира, `HOUSE` жилой дом, `OFFICE` офис, `RETAIL_SPACE` торговое помещение, `WAREHOUSE` склад, `INDUSTRIAL_BUILDING` производственное здание, `LAND` земельный участок |
+| `VEHICLES` транспорт | `CAR` легковой автомобиль, `TRUCK` грузовой транспорт, `SPECIAL_MACHINERY` спецтехника |
+| `EQUIPMENT` оборудование | `PRODUCTION_EQUIPMENT` производственное, `TRADE_EQUIPMENT` торговое |
+| `INVENTORY` товары в обороте | `GOODS` готовые товары, `RAW_MATERIALS` сырьё и материалы |
+| `FINANCIAL` финансовые активы | `DEPOSIT` депозит, `BONDS` облигации, `SHARES` акции, `RECEIVABLES` дебиторская задолженность |
