@@ -15,3 +15,7 @@ sudo docker build -t model2 model2 && sudo docker run --rm -p 8001:8000 model2
 | `localhost:8001` | `POST /approval`, `POST /alternative` | [model2/README.md](model2/README.md) |
 
 Форматы запросов и ответов — [API.md](API.md).
+
+Тренировочные запросы: 5 пользователей, `/offers` — по одному на пользователя, `/approval` и `/alternative` — по 10:
+`bash examples.sh`
+(когда оба контейнера запущены).

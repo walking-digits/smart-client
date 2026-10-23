@@ -70,4 +70,5 @@ ML_Part/*
 !ML_Part/model2/
 !ML_Part/API.md
 !ML_Part/README.md
+!ML_Part/examples.sh
 ML_Part/model*/train.py
