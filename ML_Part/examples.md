@@ -6,13 +6,142 @@
 
 ## Пользователи
 
-| Пользователь | ИНН | Кто |
-|---|---|---|
-| `IP_TRADE` | 520892877806 | ИП, торговля, выручка 13.8 млн, кредитная история без просрочек |
-| `LLC_BUILD` | 5005243165 | ООО micro, строительство, выручка 52 млн, прибыльное |
-| `LLC_MANUF` | 2354526588 | ООО small, производство, выручка 320 млн, работает 13 мес. |
-| `LLC_TRANS` | 4337532384 | ООО medium, транспорт, выручка 2 млрд |
-| `LLC_RISKY` | 2300783148 | ООО micro, торговля, выручка 13.4 млн: налоговый долг, просрочка 42 дня, долг у приставов |
+Объект `Company` — для поля `company` в запросах.
+
+### `IP_TRADE` — ИП, торговля, выручка 13.8 млн, кредитная история без просрочек
+
+```json
+{
+  "inn": "520892877806",
+  "legal_form": "IE",
+  "company_age_months": 63,
+  "okved_section": "G",
+  "msp_category": "micro",
+  "revenue_last_year": 13831730,
+  "revenue_growth_yoy": null,
+  "net_margin": null,
+  "equity_ratio": null,
+  "current_ratio": null,
+  "debt_to_revenue": null,
+  "taxes_paid_last_year": 168463,
+  "tax_arrears_amount": 0,
+  "accounts_blocked_flag": false,
+  "registry_risk_flag": false,
+  "bankruptcy_flag": false,
+  "fssp_open_amount": 0,
+  "arbitr_defendant_amount_12m": 0,
+  "bki_total_debt": 2947713,
+  "bki_max_dpd_12m": 0
+}
+```
+
+### `LLC_BUILD` — ООО micro, строительство, выручка 52 млн, прибыльное
+
+```json
+{
+  "inn": "5005243165",
+  "legal_form": "LLC",
+  "company_age_months": 190,
+  "okved_section": "F",
+  "msp_category": "micro",
+  "revenue_last_year": 51563357,
+  "revenue_growth_yoy": -0.291,
+  "net_margin": 0.098,
+  "equity_ratio": 0.143,
+  "current_ratio": 1.07,
+  "debt_to_revenue": 0.069,
+  "taxes_paid_last_year": 901964,
+  "tax_arrears_amount": 0,
+  "accounts_blocked_flag": false,
+  "registry_risk_flag": false,
+  "bankruptcy_flag": false,
+  "fssp_open_amount": 0,
+  "arbitr_defendant_amount_12m": 0,
+  "bki_total_debt": null,
+  "bki_max_dpd_12m": null
+}
+```
+
+### `LLC_MANUF` — ООО small, производство, выручка 320 млн, работает 13 мес.
+
+```json
+{
+  "inn": "2354526588",
+  "legal_form": "LLC",
+  "company_age_months": 13,
+  "okved_section": "C",
+  "msp_category": "small",
+  "revenue_last_year": 320387991,
+  "revenue_growth_yoy": -0.168,
+  "net_margin": 0.073,
+  "equity_ratio": 0.422,
+  "current_ratio": 0.763,
+  "debt_to_revenue": 0.054,
+  "taxes_paid_last_year": 15806788,
+  "tax_arrears_amount": 0,
+  "accounts_blocked_flag": false,
+  "registry_risk_flag": false,
+  "bankruptcy_flag": false,
+  "fssp_open_amount": 0,
+  "arbitr_defendant_amount_12m": 0,
+  "bki_total_debt": null,
+  "bki_max_dpd_12m": null
+}
+```
+
+### `LLC_TRANS` — ООО medium, транспорт, выручка 2 млрд
+
+```json
+{
+  "inn": "4337532384",
+  "legal_form": "LLC",
+  "company_age_months": 38,
+  "okved_section": "H",
+  "msp_category": "medium",
+  "revenue_last_year": 2000000000,
+  "revenue_growth_yoy": 0.36,
+  "net_margin": 0.036,
+  "equity_ratio": 0.094,
+  "current_ratio": 0.363,
+  "debt_to_revenue": 0.0,
+  "taxes_paid_last_year": 60524032,
+  "tax_arrears_amount": 107695,
+  "accounts_blocked_flag": false,
+  "registry_risk_flag": false,
+  "bankruptcy_flag": false,
+  "fssp_open_amount": 0,
+  "arbitr_defendant_amount_12m": 28126022,
+  "bki_total_debt": 26904067,
+  "bki_max_dpd_12m": 0
+}
+```
+
+### `LLC_RISKY` — ООО micro, торговля, выручка 13.4 млн: налоговый долг, просрочка 42 дня, долг у приставов
+
+```json
+{
+  "inn": "2300783148",
+  "legal_form": "LLC",
+  "company_age_months": 99,
+  "okved_section": "G",
+  "msp_category": "micro",
+  "revenue_last_year": 13358585,
+  "revenue_growth_yoy": 0.287,
+  "net_margin": 0.104,
+  "equity_ratio": 0.575,
+  "current_ratio": 2.505,
+  "debt_to_revenue": 0.124,
+  "taxes_paid_last_year": 609263,
+  "tax_arrears_amount": 100177,
+  "accounts_blocked_flag": false,
+  "registry_risk_flag": false,
+  "bankruptcy_flag": false,
+  "fssp_open_amount": 95898,
+  "arbitr_defendant_amount_12m": 0,
+  "bki_total_debt": 2282570,
+  "bki_max_dpd_12m": 42
+}
+```
 
 ## `POST /offers`
 
