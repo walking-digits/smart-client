@@ -1,0 +1,31 @@
+{
+  "company": {
+    "inn": "7712629803",
+    "legal_form": "LLC",
+    "company_age_months": 129,
+    "okved_section": "G",
+    "msp_category": "micro",
+    "revenue_last_year": 105336067,
+    "revenue_growth_yoy": -0.222,
+    "net_margin": 0.017,
+    "equity_ratio": 0.833,
+    "current_ratio": 6.412,
+    "debt_to_revenue": 0.018,
+    "taxes_paid_last_year": 1016423,
+    "tax_arrears_amount": 56837,
+    "accounts_blocked_flag": false,
+    "registry_risk_flag": false,
+    "bankruptcy_flag": false,
+    "fssp_open_amount": 0,
+    "arbitr_defendant_amount_12m": 0,
+    "bki_total_debt": 1157916,
+    "bki_max_dpd_12m": 0
+  },
+  "offer": {
+    "product_type": "WORKING_CAPITAL",
+    "amount": 40000000,
+    "term_months": 12,
+    "rate": 20.0,
+    "collateral_value": 0
+  }
+}
