@@ -16,6 +16,4 @@ sudo docker build -t model2 model2 && sudo docker run --rm -p 8001:8000 model2
 
 Форматы запросов и ответов — [API.md](API.md).
 
-Тренировочные запросы: 5 пользователей, `/offers` — по одному на пользователя, `/approval` и `/alternative` — по 10:
-`bash examples.sh`
-(когда оба контейнера запущены).
+Тренировочные запросы (5 пользователей, готовые команды `curl`) — [examples.md](examples.md).
