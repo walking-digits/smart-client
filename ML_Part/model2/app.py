@@ -1,4 +1,4 @@
-"""ML-сервис, модель 2: POST /approval и POST /alternative (API.md, 4.2–4.3).
+"""ML-сервис, модель 2: POST /approval, POST /approval_batch и POST /alternative (API.md, 4.2–4.3).
 
 Запуск из этой папки:
     uvicorn app:app --port 8001
@@ -11,7 +11,7 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse
 
 from contract import is_number, validate_company, validate_offer
-from model import approval_probability, find_alternative, load
+from model import approval_probability, find_alternative, load, predict_rows
 
 HERE = Path(__file__).resolve().parent
 MODEL = load()  # один раз при старте
@@ -69,6 +69,25 @@ async def approval(request: Request):
     body = await read_request(request)
     p = await run_in_threadpool(approval_probability, MODEL, body["company"], body["offer"])
     return {"approval_probability": p}
+
+
+@app.post("/approval_batch", openapi_extra=example("example_approval_batch.json"))
+async def approval_batch(request: Request):
+    """Шансы для нескольких предложений одной компании за один запрос: [p1, p2, …] в порядке offers."""
+    try:
+        body = await request.json()
+    except ValueError:
+        raise BadRequest("тело запроса не JSON")
+    if not isinstance(body, dict) or not isinstance(body.get("offers"), list) or not body["offers"]:
+        raise BadRequest("нужны поля company и offers (непустой список)")
+    errors = validate_company(body.get("company"))
+    if not errors:
+        errors = [f"offers[{i}]: {e}" for i, o in enumerate(body["offers"])
+                  for e in validate_offer(o, body["company"]["msp_category"])]
+    if errors:
+        raise BadRequest("; ".join(errors))
+    p = await run_in_threadpool(predict_rows, MODEL, body["company"], body["offers"])
+    return [round(float(x), 4) for x in p]
 
 
 @app.post("/alternative", openapi_extra=example("example_alternative.json"))
