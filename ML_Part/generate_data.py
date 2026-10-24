@@ -15,6 +15,10 @@
     * залог (v1.7): весит сильнее, плато после полного покрытия, снимает часть штрафа за крупную сумму;
     * лимит кредитования (v1.7): сумма больше годовой выручки — почти всегда отказ;
     * политика ступенями (v1.11): экспресс-зона, беззалоговый лимит, залог на превышение, DSR ступенями;
+    * залог через отношения (v1.12): все ступени — от непокрытой залогом части суммы, бонус за покрытие;
+      залог / сумма — лог-равномерно 0.05…5 (модель видит все сочетания суммы и залога);
+    * плавная политика (v1.13): вместо ступеней — плавные спады у лимита и по нагрузке;
+    * залог умножает лимит (v1.14): лимит = U × √(1 + L / 1 млн) + L — пороги разных залогов разнесены у любой компании;
     * лимит и залог (v1.10): лимит кредитования = выручка + ликвидный залог; полное покрытие снимает штраф за сумму;
     * маленькие суммы (v1.9): сумма меньше 5% выручки — бонус к одобрению (T24), у надёжной компании ≈ 100%;
     * история (v1.8): 24 месяца, признаки компании меняются помесячно (риск-события, годовая отчётность,
@@ -22,7 +26,7 @@
 Зависимости: только numpy и pandas. Детерминирован по --seed.
 
 Запуск (≈ 1 000 000 строк за 2 года + ежемесячные срезы компаний):
-    python generate_data.py --n-companies 150000 --seed 42 --out data/applications.csv
+    python generate_data.py --n-companies 150000 --seed 2026 --out data/applications.csv
 
 Параметры, не заданные спецификацией явно (выбраны разумные значения, см. GENERATOR.md):
     * employees_count у IE ограничен сверху 15 (иначе micro может нарушить лимит 15 чел.);
@@ -49,7 +53,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-GENERATOR_VERSION = "1.11"
+GENERATOR_VERSION = "1.14"
 
 # --------------------------------------------------------------------------- #
 # Справочники
@@ -187,28 +191,38 @@ AMOUNT_CLIP_HI = 6.0
 # v1.6: неподъёмные заявки — доля обращений, где просят сумму в UNREAL_MULT раз больше типичной
 # (в пределах каталога). Без них модель не видит этой области и не может дать там шанс ≈ 0.
 UNREAL_P = 0.03
-# v1.11: кредитная политика ступенями (вместо плавных T14, T18, T19, T24) — как в банке, шанс от суммы — лестница:
-#   экспресс-зона: сумма ≤ EXPRESS выручки → +EXPRESS_BONUS (≤ MICRO_SHARE — ещё +MICRO_BONUS), только при чистой
-#     истории: нет просрочки 30+, налогового долга > 50 тыс., долгов у приставов и пометок реестра;
-#   сверх беззалогового лимита (UNSECURED выручки) нужен залог на превышение: без него OVER_UNSECURED,
-#     с частичным покрытием превышения — пропорционально, с полным — OVER_UNSECURED + COVER_RELIEF;
-#   полное покрытие суммы ликвидным залогом → +FULL_COVER_BONUS;
-#   долговая нагрузка (DSR) ступенями DSR_STEPS.
-# Пороги — (micro, small/medium).
-EXPRESS = (0.10, 0.15)
-UNSECURED = (0.30, 0.40)
-EXPRESS_BONUS = 2.5
-MICRO_SHARE = 0.03      # совсем маленькая сумма (≤ 3% выручки) — ещё ступень вверх: почти автоматическое одобрение
-MICRO_BONUS = 1.5
-OVER_UNSECURED = -3.5
-COVER_RELIEF = 3.0
-FULL_COVER_BONUS = 0.5
-DSR_STEPS = [(0.3, 0.0), (0.5, -1.0), (0.7, -2.5), (1.0, -4.0)]   # DSR ≤ порога → вклад; выше 1 → DSR_OVER
-DSR_OVER = -8.0
-# v1.7: лимит кредитования — ступенька и крутой штраф (T23) сверх лимита. v1.10: лимит = выручка + ликвидная
-# стоимость залога (стоимость × доля по виду): без залога — не больше выручки, под залог — больше.
-REV_LIMIT_STEP = -8.0
-REV_LIMIT_COEF = -6.0
+# v1.13: кредитная политика — плавная, вокруг лимита кредитования (как признаки модели 2).
+# v1.14: залог УМНОЖАЕТ лимит, а не прибавляется к нему — пороги разных залогов разнесены одинаково у любой компании
+#   (в v1.13 лимит = U + 3·L: у крупной компании U велик, и залоги 1–10 млн давали почти один порог).
+#   Ликвидный залог L = стоимость × доля по виду. Лимит = U × (1 + L / COLL_BASE)^COLL_POW + L, где беззалоговая часть
+#   U = UNSEC_SHARE × выручка × (выручка / UNSEC_BASE)^(UNSEC_POW − 1) растёт медленнее выручки
+#   (13.8 млн → U ≈ 3.5 млн, 52 млн → 6.8 млн, 320 млн → 17 млн, 2 млрд → 42 млн). Слагаемое + L — сам залог: под
+#   крупный залог дают не меньше его ликвидной стоимости (как у SECURED_RE).
+#   Вклады в логит:
+#     спад у лимита: LIMIT_DROP × sigmoid(ln(сумма / лимит) / LIMIT_WIDTH) — плавно, примерно от 0.5 до 2 лимитов;
+#     маленькая сумма: SMALL_BONUS × sigmoid(ln(SMALL_OF_LIMIT × лимит / сумма) / SMALL_WIDTH), только при чистой
+#       истории: нет просрочки 30+, налогового долга > 50 тыс., долгов у приставов и пометок реестра;
+#     покрытие: COVER_COEF × min(L / сумма, 1);
+#     нагрузка: DSR_DROP × sigmoid((DSR − DSR_MID) / DSR_WIDTH), DSR — по части суммы сверх L.
+#   Формальный отказ (правила 8–9 в model2/REJECT_RULES.md, здесь — HARD_PENALTY): сумма > LIMIT_HARD × лимит
+#   или DSR > 1.
+UNSEC_SHARE = 0.3
+UNSEC_BASE = 10e6
+UNSEC_POW = 0.5
+COLL_BASE = 1e6
+COLL_POW = 0.5
+LIMIT_DROP = -8.0
+LIMIT_WIDTH = 0.3
+SMALL_OF_LIMIT = 0.25
+SMALL_BONUS = 3.0
+SMALL_WIDTH = 0.4
+COVER_COEF = 1.5
+DSR_DROP = -5.0
+DSR_MID = 0.6
+DSR_WIDTH = 0.12
+LIMIT_HARD = 2.0
+HARD_PENALTY = -20.0
+COLL_RATIO_RANGE = (0.05, 5.0)     # залог / сумма — лог-равномерно (v1.12; было lognorm с медианой 1.1: 0.5…2.8)
 UNREAL_MULT = (5.0, 50.0)
 
 # История заявок (v1.4). Обращение — компания пришла за продуктом; в обращении 1–3 попытки (заявки).
@@ -428,6 +442,8 @@ def make_inn(rng, is_ie, region):
         for ie_val, n_rand in ((True, 8), (False, 7)):  # цикл по двум формам, не по строкам
             m = is_ie[idx] == ie_val
             k = int(m.sum())
+            if k == 0:  # при перегенерации дубликатов одной из форм может не быть
+                continue
             d = np.column_stack([reg[m] // 10, reg[m] % 10, rng.integers(0, 10, (k, n_rand))])
             if ie_val:
                 d = np.column_stack([d, inn_check_digit(d, INN_W11)])
@@ -971,7 +987,7 @@ def generate_applications(rng, comp, H):
     p_coll = np.array([COLLATERAL_P.get(p, 0.0) for p in PRODUCTS])[prod]
     p_coll = np.where(p_coll < 1, np.minimum(p_coll * np.where(is_ie, 0.6, 1.2), 1.0), p_coll)
     has_coll = rng.random(nr) < p_coll
-    coll_raw = amount * lognorm(rng, 1.1, 0.35, nr)
+    coll_raw = amount * np.exp(rng.uniform(*np.log(COLL_RATIO_RANGE), nr))
     ltv = rng.uniform(0.4, SECURED_RE_MAX_LTV, nr)
     coll_raw = np.where(prod == P["SECURED_RE"], amount / ltv, coll_raw)
     collateral = np.where(has_coll, ceil2(coll_raw), 0).astype(np.int64)
@@ -987,27 +1003,23 @@ def generate_applications(rng, comp, H):
              & (col(c, "fssp_open_amount") == 0) & (col(c, "registry_risk_flag") == 0))
 
     def offer_score(idx, amt, trm, coll):
-        """Кредитная политика (v1.11, ступени) + T16 срок, T17 ставка, T23 лимит для обращений idx."""
+        """Кредитная политика (v1.14: плавная, лимит = U × (1 + L / COLL_BASE)^COLL_POW + L) + T16 срок, T17 ставка."""
         r_m = rate[idx] / 1200
         payment = amt * r_m / (1 - (1 + r_m) ** (-trm.astype(float)))
         rev = rev_r[idx]
-        dsr = payment * np.minimum(12, trm) / rev                          # долговая нагрузка (DSR)
         liquid = coll * sub_share[idx]                                      # залог после дисконта
-        limit = rev + liquid                                                # лимит = выручка + ликвидный залог
-        small = ~micro[idx]
-        share = amt / rev
-        express = share <= np.where(small, EXPRESS[1], EXPRESS[0])
-        excess = np.maximum(0.0, amt - np.where(small, UNSECURED[1], UNSECURED[0]) * rev)
-        over = np.where(excess > 0, OVER_UNSECURED + COVER_RELIEF * np.minimum(1.0, liquid / np.maximum(excess, 1)), 0.0)
-        dsr_step = np.select([dsr <= t for t, _ in DSR_STEPS], [v for _, v in DSR_STEPS], DSR_OVER) * dsr_on[idx]
-        return ((EXPRESS_BONUS * express + MICRO_BONUS * (share <= MICRO_SHARE)) * clean[idx]   # экспресс / микро-сумма
-                + over                                                                          # сверх беззалогового лимита
-                + FULL_COVER_BONUS * (liquid >= amt)                                            # полное покрытие
-                + dsr_step                                                                      # нагрузка ступенями
+        unsec = UNSEC_SHARE * rev * (rev / UNSEC_BASE) ** (UNSEC_POW - 1)   # беззалоговая часть U
+        limit = unsec * (1 + liquid / COLL_BASE) ** COLL_POW + liquid
+        rel = np.log(amt / limit)                                           # сумма относительно лимита (лог.)
+        unsecured = np.maximum(0.0, amt - liquid) / amt                    # доля суммы сверх ликвидного залога
+        dsr = payment * np.minimum(12, trm) / rev * unsecured * dsr_on[idx]
+        return (LIMIT_DROP * sigmoid(rel / LIMIT_WIDTH)                                         # спад у лимита
+                + SMALL_BONUS * sigmoid((np.log(SMALL_OF_LIMIT) - rel) / SMALL_WIDTH) * clean[idx]  # маленькая сумма
+                + COVER_COEF * np.minimum(liquid / amt, 1.0)                                    # покрытие залогом
+                + DSR_DROP * sigmoid((dsr - DSR_MID) / DSR_WIDTH)                               # нагрузка
+                + HARD_PENALTY * ((amt > LIMIT_HARD * limit) | (dsr > 1))                       # формальный отказ
                 + TERM_COEF * np.clip(np.log(trm / BASE_TERM[prod[idx]]), -1.5, 1.5)            # T16: срок
-                + RATE_COEF * np.clip(np.log(rate[idx] / base_rate[idx]), -0.5, 0.5)            # T17: ставка
-                + REV_LIMIT_STEP * (amt > limit)                                                # T23: сумма > лимита
-                + REV_LIMIT_COEF * np.clip(np.log(amt / limit), 0, 5))
+                + RATE_COEF * np.clip(np.log(rate[idx] / base_rate[idx]), -0.5, 0.5))
 
     # ---- Первая попытка и калибровка b_p (цели одобрения — по первым попыткам) ----
     need_score = np.sum(T_company, axis=0) + rng.normal(0, NOISE_NEED_SIGMA, nr)       # T15: общий шум
@@ -1055,7 +1067,7 @@ def generate_applications(rng, comp, H):
         cut = rng.random(mr) < RETRY_CUT_P
         a = np.where(cut, np.maximum(AMT_MIN[pr], round2(a * rng.uniform(*RETRY_CUT, mr))), a).astype(np.int64)
         add = np.isin(pr, coll_add) & (cv == 0) & (rng.random(mr) < RETRY_COLLATERAL_P)
-        cv = np.where(add, ceil2(a * lognorm(rng, 1.1, 0.35, mr)), cv).astype(np.int64)
+        cv = np.where(add, ceil2(a * np.exp(rng.uniform(*np.log(COLL_RATIO_RANGE), mr))), cv).astype(np.int64)
         gpos = np.argmax(grid[pr] == t[:, None], axis=1)
         nxt = grid[pr, np.minimum(gpos + 1, grid_len[pr] - 1)]
         nxt = np.where(gov_micro[idx] & (nxt > GOV_MICRO_MAX_TERM), t, nxt)
@@ -1298,7 +1310,7 @@ def control_values(comp, apps, internal, calib):
 def main():
     ap = argparse.ArgumentParser(description="Генератор мок-данных заявок МСБ (spec v1.1, v1.4)")
     ap.add_argument("--n-companies", type=int, default=150_000)  # ≈ 1 000 000 строк за 2 года
-    ap.add_argument("--seed", type=int, default=42)
+    ap.add_argument("--seed", type=int, default=2026)
     ap.add_argument("--out", type=str, default="data/applications.csv")
     args = ap.parse_args()
 

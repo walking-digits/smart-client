@@ -65,7 +65,7 @@ htmlcov/
 
 
 # ML_Part: сервисы, генератор данных, тесты и обучение. Сами данные (CSV, срезы) — не в git: > 100 МБ,
-# воспроизводятся командой python generate_data.py (seed 42, совпадение по sha256 в dataset_meta.json).
+# воспроизводятся командой python generate_data.py (seed 2026, совпадение по sha256 в dataset_meta.json).
 ML_Part/*
 !ML_Part/model1/
 !ML_Part/model2/

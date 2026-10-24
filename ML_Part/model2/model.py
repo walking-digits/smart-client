@@ -32,12 +32,20 @@ NUMERIC = [
     "equity_ratio", "current_ratio", "debt_to_revenue", "taxes_paid_last_year", "tax_arrears_amount",
     "accounts_blocked_flag", "registry_risk_flag", "bankruptcy_flag",
     "fssp_open_amount", "arbitr_defendant_amount_12m", "bki_total_debt", "bki_max_dpd_12m",
-    "amount", "term_months", "rate", "collateral_value",
+    "amount", "term_months", "rate",
 ]
+# Залог в модель идёт не суммой, а отношениями — как в генераторе данных (v1.14). L — ликвидный залог
+# (стоимость × доля по виду, COLL_SHARE), U — беззалоговая часть лимита:
+#   выручка / L, сумма / L — залог относительно компании и кредита;
+#   сумма / лимит, сумма / U — где заявка относительно лимита с залогом и без;
+#   L / U и множитель лимита (1 + L / COLL_BASE)^COLL_POW — насколько залог раздвигает лимит;
+#   DSR — по части суммы сверх L. Без залога выручка / L и сумма / L «бесконечны» — ставим большое число (как при L → 0).
+NO_COLLATERAL = 1e12
 # Монотонность: −1 — признак ↑ → шанс ↓, +1 — признак ↑ → шанс ↑. Все признаки суммы — в одну сторону
 # (меньше сумма → выше шанс), залог — в другую, риски клиента — вниз. Срок и ставку не ограничиваем.
-MONOTONE = {"amount": -1, "log_amount": -1, "amount_to_revenue": -1, "dsr": -1,
-            "collateral_value": +1, "collateral_ratio": +1,
+MONOTONE = {"amount": -1, "log_amount": -1, "amount_to_revenue": -1, "dsr": -1, "amount_to_limit": -1, "amount_to_unsecured": -1,
+            "collateral_to_unsecured": +1, "collateral_factor": +1,
+            "amount_to_collateral": -1, "revenue_to_collateral": -1,   # меньше залог → отношение больше → шанс не выше
             # риски клиента: больше просрочка / долги / иски — шанс не выше (без «зубчиков» от шума деревьев)
             "bki_max_dpd_12m": -1, "tax_arrears_amount": -1, "fssp_open_amount": -1,
             "arbitr_defendant_amount_12m": -1, "bki_total_debt": -1, "bki_debt_to_revenue": -1}
@@ -59,20 +67,55 @@ def make_X(rows: pd.DataFrame) -> pd.DataFrame:
     a, t, r_m = X["amount"], X["term_months"], X["rate"] / 1200
     X["log_amount"] = np.log(a)
     X["amount_to_revenue"] = a / rev
-    X["collateral_ratio"] = X["collateral_value"] / a
-    payment = a * r_m / (1 - (1 + r_m) ** (-t))            # аннуитетный платёж в месяц
-    X["dsr"] = payment * np.minimum(12, t) / rev           # платежи за год / выручка
+    liq = liquid(rows)
+    X["revenue_to_collateral"] = np.where(liq > 0, rev / liq.where(liq > 0), NO_COLLATERAL)
+    X["amount_to_collateral"] = np.where(liq > 0, a / liq.where(liq > 0), NO_COLLATERAL)
+    X["amount_to_limit"] = a / credit_limit(rev, liq)
+    X["dsr"] = dsr(a, t, X["rate"], rev) * unsecured_share(a, liq)   # нагрузка части сверх залоговой
+    X["amount_to_unsecured"] = a / unsecured_limit(rev)
+    X["collateral_to_unsecured"] = liq / unsecured_limit(rev)
+    X["collateral_factor"] = collateral_factor(liq)
     return X
 
 
 # Формальные признаки отказа (REJECT_RULES.md): такие заявки получают шанс 0, модель на них не учится
 GOV_OKVED = set("ACDEFHIJQS")
 MIN_AGE_PRODUCTS = {"INVESTMENT", "SECURED_RE", "CREDIT_LINE_REV", "GOV_1764"}
+# Лимит кредитования (как в генераторе, v1.14): U × (1 + L / COLL_BASE)^COLL_POW + L,
+# U = UNSEC_SHARE × выручка^UNSEC_POW × UNSEC_BASE^(1 − UNSEC_POW)
+UNSEC_SHARE, UNSEC_BASE, UNSEC_POW = 0.3, 10e6, 0.5
+COLL_BASE, COLL_POW = 1e6, 0.5
+LIMIT_HARD = 2.0   # правило 8: сумма больше LIMIT_HARD лимитов
 # Доля стоимости залога, которую банк засчитывает (1 − залоговый дисконт) — для лимита кредитования (правило 8)
 COLL_SHARE = {"APARTMENT": 0.80, "HOUSE": 0.70, "OFFICE": 0.70, "RETAIL_SPACE": 0.70, "WAREHOUSE": 0.65,
               "INDUSTRIAL_BUILDING": 0.60, "LAND": 0.55, "CAR": 0.65, "TRUCK": 0.60, "SPECIAL_MACHINERY": 0.55,
               "PRODUCTION_EQUIPMENT": 0.55, "TRADE_EQUIPMENT": 0.50, "GOODS": 0.50, "RAW_MATERIALS": 0.45,
               "DEPOSIT": 0.95, "BONDS": 0.80, "SHARES": 0.60, "RECEIVABLES": 0.55}
+
+
+def liquid(rows: pd.DataFrame) -> pd.Series:
+    """Ликвидный залог: стоимость × доля, которую банк засчитывает по виду."""
+    return rows["collateral_value"].astype(float) * rows["collateral_subtype"].map(COLL_SHARE).fillna(0.0)
+
+
+def unsecured_limit(revenue):
+    """Беззалоговая часть лимита U: растёт медленнее выручки."""
+    return UNSEC_SHARE * revenue * (revenue / UNSEC_BASE) ** (UNSEC_POW - 1)
+
+
+def collateral_factor(liq):
+    """Во сколько раз залог умножает беззалоговую часть лимита."""
+    return (1 + liq / COLL_BASE) ** COLL_POW
+
+
+def credit_limit(revenue, liq):
+    """Лимит кредитования: U × множитель залога + сам ликвидный залог."""
+    return unsecured_limit(revenue) * collateral_factor(liq) + liq
+
+
+def unsecured_share(amount, liq):
+    """Доля суммы сверх ликвидного залога L."""
+    return np.maximum(0.0, amount - liq) / amount
 
 
 def dsr(amount, term, rate, revenue):
@@ -88,8 +131,8 @@ def reject_mask(rows: pd.DataFrame) -> np.ndarray:
     rev = rows["revenue_last_year"].astype(float)
     gov = p == "GOV_1764"
     amount = rows["amount"].astype(float)
-    liquid = rows["collateral_value"].astype(float) * rows["collateral_subtype"].map(COLL_SHARE).fillna(0.0)
-    pay = dsr(amount, rows["term_months"].astype(float), rows["rate"].astype(float), rev)
+    liq = liquid(rows)
+    pay = dsr(amount, rows["term_months"].astype(float), rows["rate"].astype(float), rev) * unsecured_share(amount, liq)
     return (rows["accounts_blocked_flag"].astype(bool)                                     # 1
             | rows["bankruptcy_flag"].astype(bool)                                         # 2
             | (age < 3)                                                                    # 3
@@ -97,7 +140,7 @@ def reject_mask(rows: pd.DataFrame) -> np.ndarray:
             | (gov & (rows["tax_arrears_amount"] > 50_000))                                # 5
             | (gov & ~rows["okved_section"].isin(GOV_OKVED))                               # 6
             | ((p == "FACTORING") & (rev < 20_000_000))                                    # 7
-            | (amount > rev + liquid)                                                       # 8
+            | (amount > LIMIT_HARD * credit_limit(rev, liq))                               # 8
             | ((p != "FACTORING") & (pay > 1))).to_numpy()                                 # 9
 
 
@@ -105,10 +148,12 @@ def reject_mask(rows: pd.DataFrame) -> np.ndarray:
 # pandas на одной строке тратит ≈ 5 мс, numpy — ≈ 0.05 мс. Значения и порядок — как в make_X
 # (train.py сверяет оба пути); порядок проверяется при загрузке модели.
 FAST_ORDER = (NUMERIC + list(CATEGORIES) + ["log_revenue", "tax_burden", "bki_debt_to_revenue", "has_bki", "has_fin",
-                                            "product_type", "log_amount", "amount_to_revenue", "collateral_ratio", "dsr"])
+                                            "product_type", "log_amount", "amount_to_revenue", "revenue_to_collateral",
+                                            "amount_to_collateral", "amount_to_limit", "dsr",
+                                            "amount_to_unsecured", "collateral_to_unsecured", "collateral_factor"])
 CAT_INDEX = {col: {v: i for i, v in enumerate(cats)} for col, cats in CATEGORIES.items()}
 CAT_INDEX["product_type"] = {p: i for i, p in enumerate(PRODUCT_TYPES)}
-COMPANY_NUMERIC = NUMERIC[:16]                               # без amount, term_months, rate, collateral_value
+COMPANY_NUMERIC = NUMERIC[:16]                               # без amount, term_months, rate
 
 
 def _num(v):
@@ -128,25 +173,33 @@ def features_np(company: dict, offers: list) -> np.ndarray:
     t = np.array([o["term_months"] for o in offers], dtype=float)
     r = np.array([o["rate"] for o in offers], dtype=float)
     c = np.array([o["collateral_value"] for o in offers], dtype=float)
-    X[:, 16], X[:, 17], X[:, 18], X[:, 19] = a, t, r, c
-    X[:, 20] = _code("legal_form", company["legal_form"])
-    X[:, 21] = _code("okved_section", company["okved_section"])
-    X[:, 22] = _code("msp_category", company["msp_category"])
-    X[:, 23] = [_code("collateral_type", o["collateral_type"]) for o in offers]
-    X[:, 24] = [_code("collateral_subtype", o["collateral_subtype"]) for o in offers]
+    X[:, 16], X[:, 17], X[:, 18] = a, t, r
+    X[:, 19] = _code("legal_form", company["legal_form"])
+    X[:, 20] = _code("okved_section", company["okved_section"])
+    X[:, 21] = _code("msp_category", company["msp_category"])
+    X[:, 22] = [_code("collateral_type", o["collateral_type"]) for o in offers]
+    X[:, 23] = [_code("collateral_subtype", o["collateral_subtype"]) for o in offers]
     rev, taxes, bki, margin = X[0, 1], X[0, 7], X[0, 14], X[0, 3]
-    X[:, 25] = np.log(rev)
-    X[:, 26] = taxes / rev
-    X[:, 27] = bki / rev
-    X[:, 28] = float(not np.isnan(bki))
-    X[:, 29] = float(not np.isnan(margin))
-    X[:, 30] = [_code("product_type", o["product_type"]) for o in offers]
+    X[:, 24] = np.log(rev)
+    X[:, 25] = taxes / rev
+    X[:, 26] = bki / rev
+    X[:, 27] = float(not np.isnan(bki))
+    X[:, 28] = float(not np.isnan(margin))
+    X[:, 29] = [_code("product_type", o["product_type"]) for o in offers]
     r_m = r / 1200
-    X[:, 31] = np.log(a)
-    X[:, 32] = a / rev
-    X[:, 33] = c / a
+    X[:, 30] = np.log(a)
+    X[:, 31] = a / rev
+    liq = c * np.array([COLL_SHARE.get(o["collateral_subtype"], 0.0) for o in offers])
+    safe = np.where(liq > 0, liq, 1.0)
+    X[:, 32] = np.where(liq > 0, rev / safe, NO_COLLATERAL)
+    X[:, 33] = np.where(liq > 0, a / safe, NO_COLLATERAL)
+    X[:, 34] = a / credit_limit(rev, liq)
     payment = a * r_m / (1 - (1 + r_m) ** (-t))
-    X[:, 34] = payment * np.minimum(12, t) / rev
+    X[:, 35] = payment * np.minimum(12, t) / rev * unsecured_share(a, liq)
+    u = unsecured_limit(rev)
+    X[:, 36] = a / u
+    X[:, 37] = liq / u
+    X[:, 38] = collateral_factor(liq)
     return X
 
 
@@ -155,12 +208,15 @@ def reject_np(company: dict, offers: list) -> np.ndarray:
     age, rev = company["company_age_months"], float(company["revenue_last_year"])
     always = bool(company["accounts_blocked_flag"]) or bool(company["bankruptcy_flag"]) or age < 3   # 1–3
     gov_bad = company["tax_arrears_amount"] > 50_000 or company["okved_section"] not in GOV_OKVED   # 5–6
+    liq = [o["collateral_value"] * COLL_SHARE.get(o["collateral_subtype"], 0.0) for o in offers]
     return np.array([always or (age < 12 and o["product_type"] in MIN_AGE_PRODUCTS)                 # 4
                      or (o["product_type"] == "GOV_1764" and gov_bad)
                      or (o["product_type"] == "FACTORING" and rev < 20_000_000)                     # 7
-                     or o["amount"] > rev + o["collateral_value"] * COLL_SHARE.get(o["collateral_subtype"], 0.0)  # 8
+                     or o["amount"] > LIMIT_HARD * credit_limit(rev, L)                             # 8
                      or (o["product_type"] != "FACTORING"
-                         and dsr(o["amount"], o["term_months"], o["rate"], rev) > 1) for o in offers])  # 9
+                         and dsr(o["amount"], o["term_months"], o["rate"], rev)
+                         * unsecured_share(o["amount"], L) > 1)                                     # 9
+                     for o, L in zip(offers, liq)])
 
 
 def monotone_constraints(columns) -> list:
