@@ -1,13 +1,27 @@
+// ThemeToggle.tsx
 "use client";
 
 import { Moon, Sun } from "lucide-react";
 import { useTheme } from "next-themes";
 
 import { Button } from "@/app/components/ui/button";
+import React from "react";
 
 export default function ThemeToggle() {
   const { setTheme, resolvedTheme } = useTheme();
+  const [mounted, setMounted] = React.useState(false);
 
+  React.useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  if (!mounted) {
+    return (
+      <Button variant="ghost" size="icon" disabled>
+        <Sun className="size-[1.15rem]" />
+      </Button>
+    );
+  }
   return (
     <Button
       variant="ghost"

@@ -1,3 +1,4 @@
+// page.tsx
 import type { Metadata } from "next";
 import { MessageSquareText } from "lucide-react";
 
@@ -8,7 +9,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/app/components/ui/card";
-import { LoginForm } from "./LoginForm";
+import { LoginCard } from "./LoginCard";
 
 export const metadata: Metadata = {
   title: "Вход в кабинет",
@@ -40,7 +41,7 @@ export default function LoginPage() {
         </CardHeader>
 
         <CardContent className="py-6">
-          <LoginForm />
+          <LoginCard />
         </CardContent>
       </Card>
     </main>
