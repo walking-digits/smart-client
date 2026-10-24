@@ -1,6 +1,7 @@
-# Модель 2: `/approval` и `/alternative`
+# Модель 2: `/approval`, `/approval_batch` и `/alternative`
 
 - `POST /approval` — шанс, что заявку одобрят.
+- `POST /approval_batch` — то же для нескольких предложений одним запросом.
 - `POST /alternative` — похожее предложение того же продукта, у которого шанс больше `gamma`.
 
 ## Запуск
@@ -24,6 +25,13 @@ curl -X POST localhost:8001/approval -H "Content-Type: application/json" -d @exa
 ```
 
 ```bash
+curl -X POST localhost:8001/approval_batch -H "Content-Type: application/json" -d @example_approval_batch.json
+```
+```json
+[0.2431, 0.5773, 0.9106]
+```
+
+```bash
 curl -X POST localhost:8001/alternative -H "Content-Type: application/json" -d @example_alternative.json
 ```
 ```json
@@ -43,13 +51,13 @@ curl -X POST localhost:8001/alternative -H "Content-Type: application/json" -d @
 - Подходящего нет → `"offer": null` (это не ошибка).
 - Ошибка в запросе → `422 {"error": {"code": "VALIDATION_ERROR", "message": "..."}}`.
 
-Формат полей — [../API.md](../API.md), разделы 4.2–4.3. В браузере — `http://localhost:8001/docs`.
+Формат полей — [../API.md](../API.md), разделы 4.2–4.4. В браузере — `http://localhost:8001/docs`.
 
 ## Для разработчика ML
 
 | Файл | Что внутри |
 |---|---|
-| `app.py` | ручки `/approval`, `/alternative`, `/health` |
+| `app.py` | ручки `/approval`, `/approval_batch`, `/alternative`, `/health` |
 | `model.py` | признаки, прогноз, поиск альтернативы; веса похожести `W_AMOUNT`, `W_TERM`, `W_COLL` |
 | `contract.py` | проверка запроса |
 | `REJECT_RULES.md` | формальные признаки отказа (шанс 0) |

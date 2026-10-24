@@ -4,7 +4,7 @@
 
 ```
 Фронт ──► Backend ──┬──► ML: модель 1 (контейнер model1)   POST /offers
-                    └──► ML: модель 2 (контейнер model2)   POST /approval, POST /alternative
+                    └──► ML: модель 2 (контейнер model2)   POST /approval, POST /approval_batch, POST /alternative
 ```
 
 | Сервис | Что делает |
@@ -12,7 +12,7 @@
 | Фронт | ввод ИНН, выбор продукта, ввод параметров; вызывает Backend |
 | Backend | находит данные компании по ИНН, собирает объект `Company` и передаёт запрос в ML |
 | ML: модель 1 | подбирает продукты и условия (`/offers`) |
-| ML: модель 2 | считает шанс одобрения и ищет похожее предложение с высоким шансом (`/approval`, `/alternative`) |
+| ML: модель 2 | считает шанс одобрения и ищет похожее предложение с высоким шансом (`/approval`, `/approval_batch`, `/alternative`) |
 
 ML-сервисы ничего не запрашивают сами: всё нужное приходит в запросе. Это два отдельных контейнера
 с двумя адресами; у Backend — два адреса в настройках. Локально: модель 1 — `localhost:8000`,
@@ -273,6 +273,42 @@ pd.read_csv("data/applications.csv", dtype={"inn": str})   # иначе ИНН �
 | `offer` | `Offer` или `null` | найденное предложение; `null` — подходящего нет (это не ошибка) |
 | `likelyhood` | float, 0…1, или `null` | похожесть на исходное; 1 — то же самое |
 | `approval_probability` | float или `null` | шанс одобрения найденного |
+
+### 4.4. `POST /approval_batch` — шанс одобрения для нескольких предложений
+
+То же, что `/approval`, но для нескольких предложений одной компании за один запрос.
+
+**Запрос:**
+
+```json
+{
+  "company": { "inn": "7701234560", "legal_form": "LLC", "...": "все поля Company" },
+  "offers": [
+    { "product_type": "WORKING_CAPITAL", "amount": 5000000, "term_months": 24,
+      "rate": 20.0, "collateral_value": 6000000,
+      "collateral_type": "REAL_ESTATE", "collateral_subtype": "WAREHOUSE" },
+    { "product_type": "OVERDRAFT", "amount": 3000000, "term_months": 12,
+      "rate": 18.0, "collateral_value": 0, "collateral_type": null, "collateral_subtype": null }
+  ]
+}
+```
+
+| Поле | Тип | Описание |
+|---|---|---|
+| `company` | `Company` | компания |
+| `offers` | array of `Offer`, не пустой | предложения |
+
+**Ответ `200`:**
+
+```json
+[0.71, 0.58]
+```
+
+| Поле | Тип | Описание |
+|---|---|---|
+| `[i]` | float, 0…1 | шанс одобрения `offers[i]`, порядок тот же |
+
+Ошибка в одном предложении → `422` на весь запрос, в `message` номер: `offers[1]: ...`.
 
 ---
 
