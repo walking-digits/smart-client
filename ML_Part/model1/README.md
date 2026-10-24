@@ -21,8 +21,8 @@ curl -X POST localhost:8000/offers -H "Content-Type: application/json" -d @examp
 {
   "offers": [
     {
-      "offer": {"product_type": "WORKING_CAPITAL", "amount": 21000000, "term_months": 36, "rate": 19.2, "collateral_value": 7500000},
-      "oftenhood": 0.5361
+      "offer": {"product_type": "WORKING_CAPITAL", "amount": 21000000, "term_months": 36, "rate": 19.0, "collateral_value": 0},
+      "oftenhood": 0.78
     },
     ...ещё 9 продуктов
   ]

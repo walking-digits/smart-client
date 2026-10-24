@@ -23,6 +23,18 @@ CATEGORIES = {
     "okved_section": list("ABCDEFGHIJKLMNPQRS"),
     "msp_category": ["micro", "small", "medium"],
 }
+# Укрупнённые группы отраслей: похожие по структуре отрасли делят данные (особенно редкие разделы ОКВЭД)
+OKVED_GROUP = {
+    "B": "industry", "C": "industry", "D": "industry", "E": "industry",   # производство, добыча, энергетика
+    "F": "construction",
+    "G": "trade",
+    "H": "transport",
+    "A": "agriculture",
+    "I": "services", "S": "services",                                    # общепит и бытовые услуги
+    "J": "knowledge", "M": "knowledge", "K": "knowledge",                 # ИТ, профессиональные услуги, финансы
+    "L": "property", "N": "property",                                    # недвижимость и аренда
+    "P": "social", "Q": "social", "R": "social",                         # образование, медицина, культура
+}
 NUMERIC = [
     "company_age_months", "revenue_last_year", "revenue_growth_yoy", "net_margin",
     "equity_ratio", "current_ratio", "debt_to_revenue", "taxes_paid_last_year", "tax_arrears_amount",
@@ -36,6 +48,8 @@ def make_X(rows: pd.DataFrame) -> pd.DataFrame:
     X = rows[NUMERIC].astype(float)  # null → NaN, true/false → 1/0
     for col, cats in CATEGORIES.items():
         X[col] = pd.Categorical(rows[col], categories=cats)  # одинаковые коды категорий в обучении и в сервисе
+    X["okved_group"] = pd.Categorical(rows["okved_section"].map(OKVED_GROUP),
+                                      categories=sorted(set(OKVED_GROUP.values())))
     rev = X["revenue_last_year"]
     X["log_revenue"] = np.log(rev)
     X["tax_burden"] = X["taxes_paid_last_year"] / rev

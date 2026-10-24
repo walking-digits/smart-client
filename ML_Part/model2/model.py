@@ -62,6 +62,27 @@ def make_X(rows: pd.DataFrame) -> pd.DataFrame:
     return X
 
 
+# Формальные признаки отказа (REJECT_RULES.md): такие заявки получают шанс 0, модель на них не учится
+GOV_OKVED = set("ACDEFHIJQS")
+MIN_AGE_PRODUCTS = {"INVESTMENT", "SECURED_RE", "CREDIT_LINE_REV", "GOV_1764"}
+
+
+def reject_mask(rows: pd.DataFrame) -> np.ndarray:
+    """rows — поля Company + Offer. True — заявка не проходит хотя бы одно правило из REJECT_RULES.md."""
+    p = rows["product_type"]
+    age = rows["company_age_months"]
+    rev = rows["revenue_last_year"].astype(float)
+    gov = p == "GOV_1764"
+    return (rows["accounts_blocked_flag"].astype(bool)                                     # 1
+            | rows["bankruptcy_flag"].astype(bool)                                         # 2
+            | (age < 3)                                                                    # 3
+            | ((age < 12) & p.isin(MIN_AGE_PRODUCTS))                                      # 4
+            | (gov & (rows["tax_arrears_amount"] > 50_000))                                # 5
+            | (gov & ~rows["okved_section"].isin(GOV_OKVED))                               # 6
+            | ((p == "FACTORING") & (rev < 20_000_000))                                    # 7
+            | (rows["amount"].astype(float) > rev)).to_numpy()                             # 8
+
+
 def monotone_constraints(columns) -> list:
     return [MONOTONE.get(c, 0) for c in columns]
 
@@ -73,7 +94,8 @@ def load() -> lgb.Booster:
 def predict_rows(model, company: dict, offers: list) -> np.ndarray:
     """Шанс одобрения для нескольких предложений одной компании — одним вызовом модели."""
     rows = pd.DataFrame([{**company, **o} for o in offers])
-    return model.predict(make_X(rows), num_threads=1)  # один поток: не мешает параллельным запросам
+    p = model.predict(make_X(rows), num_threads=1)  # один поток: не мешает параллельным запросам
+    return np.where(reject_mask(rows), 0.0, p)
 
 
 def approval_probability(model, company: dict, offer: dict) -> float:

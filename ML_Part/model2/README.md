@@ -18,7 +18,7 @@ sudo docker run --rm -p 8001:8000 model2
 curl -X POST localhost:8001/approval -H "Content-Type: application/json" -d @example_approval.json
 ```
 ```json
-{"approval_probability": 0.5179}
+{"approval_probability": 0.5431}
 ```
 
 ```bash
@@ -26,16 +26,17 @@ curl -X POST localhost:8001/alternative -H "Content-Type: application/json" -d @
 ```
 ```json
 {
-  "source_approval_probability": 0.5179,
-  "offer": {"product_type": "WORKING_CAPITAL", "amount": 30000000, "term_months": 12, "rate": 20.0,
+  "source_approval_probability": 0.5431,
+  "offer": {"product_type": "WORKING_CAPITAL", "amount": 27000000, "term_months": 12, "rate": 20.0,
             "collateral_value": 0, "collateral_type": null, "collateral_subtype": null},
-  "likelyhood": 0.75,
-  "approval_probability": 0.7005
+  "likelyhood": 0.675,
+  "approval_probability": 0.7281
 }
 ```
 
 - Залог: `collateral_type` и `collateral_subtype` — вид залога (справочник в [../API.md](../API.md),
   раздел 6); без залога — `null`.
+- Формальный признак отказа ([REJECT_RULES.md](REJECT_RULES.md)) → шанс `0`.
 - Исходное уже проходит порог → вернётся оно, `likelyhood` = 1.
 - Подходящего нет → `"offer": null` (это не ошибка).
 - Ошибка в запросе → `422 {"error": {"code": "VALIDATION_ERROR", "message": "..."}}`.
@@ -49,4 +50,5 @@ curl -X POST localhost:8001/alternative -H "Content-Type: application/json" -d @
 | `app.py` | ручки `/approval`, `/alternative`, `/health` |
 | `model.py` | признаки, прогноз, поиск альтернативы; веса похожести `W_AMOUNT`, `W_TERM`, `W_COLL` |
 | `contract.py` | проверка запроса |
+| `REJECT_RULES.md` | формальные признаки отказа (шанс 0) |
 | `artifacts/approval.txt` | обученная модель |
