@@ -10,6 +10,8 @@ sudo docker build -t model2 .
 sudo docker run --rm -p 8001:8000 model2
 ```
 
+8 процессов: 10 000 запросов `/approval` ≈ 2 с, `/alternative` ≈ 5–6 с. На слабой машине: `-e WEB_CONCURRENCY=4`.
+
 ## Запросы
 
 Из этой папки, в другом терминале:
@@ -18,7 +20,7 @@ sudo docker run --rm -p 8001:8000 model2
 curl -X POST localhost:8001/approval -H "Content-Type: application/json" -d @example_approval.json
 ```
 ```json
-{"approval_probability": 0.5431}
+{"approval_probability": 0.6054}
 ```
 
 ```bash
@@ -26,11 +28,11 @@ curl -X POST localhost:8001/alternative -H "Content-Type: application/json" -d @
 ```
 ```json
 {
-  "source_approval_probability": 0.5431,
-  "offer": {"product_type": "WORKING_CAPITAL", "amount": 27000000, "term_months": 12, "rate": 20.0,
+  "source_approval_probability": 0.6054,
+  "offer": {"product_type": "WORKING_CAPITAL", "amount": 31000000, "term_months": 12, "rate": 20.0,
             "collateral_value": 0, "collateral_type": null, "collateral_subtype": null},
-  "likelyhood": 0.675,
-  "approval_probability": 0.7281
+  "likelyhood": 0.775,
+  "approval_probability": 0.7042
 }
 ```
 

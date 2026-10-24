@@ -17,3 +17,14 @@ sudo docker build -t model2 model2 && sudo docker run --rm -p 8001:8000 model2
 Форматы запросов и ответов — [API.md](API.md).
 
 Тренировочные запросы (5 пользователей, готовые команды `curl`) — [examples.md](examples.md).
+
+## Данные, обучение, тесты
+
+| Что | Как |
+|---|---|
+| Синтетические данные | `python generate_data.py` — 1 млн заявок за 2 года и ежемесячные срезы компаний в `data/` ([GENERATOR.md](GENERATOR.md)) |
+| Переобучить модели | `python model1/train.py`, `python model2/train.py` |
+| Тесты | запустить оба сервиса, затем `python mock/stress_test.py` — 69 тестов, отчёт [TEST_REPORT.md](TEST_REPORT.md) |
+
+Окружение для этого — `pip install -r requirements.txt` (сервисам в Docker оно не нужно).
+

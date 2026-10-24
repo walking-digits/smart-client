@@ -14,4 +14,6 @@ COPY app.py model.py contract.py example_approval.json example_alternative.json 
 COPY artifacts/ artifacts/
 
 EXPOSE 8000
-CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2"]
+# Процессов uvicorn: 8 — 10 000 запросов /alternative ≈ 5–6 с. Меньше: docker run -e WEB_CONCURRENCY=4 ...
+ENV WEB_CONCURRENCY=8
+CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8000"]

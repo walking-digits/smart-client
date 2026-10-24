@@ -64,11 +64,19 @@ htmlcov/
 .cache/
 
 
-# ML_Part: в git только то, на чём работают сервисы. Данные, генератор, мок, обучение — локально.
+# ML_Part: сервисы, генератор данных, тесты и обучение. Сами данные (CSV, срезы) — не в git: > 100 МБ,
+# воспроизводятся командой python generate_data.py (seed 42, совпадение по sha256 в dataset_meta.json).
 ML_Part/*
 !ML_Part/model1/
 !ML_Part/model2/
+!ML_Part/mock/
 !ML_Part/API.md
 !ML_Part/README.md
 !ML_Part/examples.md
-ML_Part/model*/train.py
+!ML_Part/generate_data.py
+!ML_Part/GENERATOR.md
+!ML_Part/requirements.txt
+!ML_Part/TEST_REPORT.md
+!ML_Part/data/
+ML_Part/data/*
+!ML_Part/data/dataset_meta.json

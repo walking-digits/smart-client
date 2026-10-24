@@ -83,19 +83,80 @@ def reject_mask(rows: pd.DataFrame) -> np.ndarray:
             | (rows["amount"].astype(float) > rev)).to_numpy()                             # 8
 
 
+# ---- Быстрый путь для сервиса: признаки сразу в numpy, без pandas ----
+# pandas на одной строке тратит ≈ 5 мс, numpy — ≈ 0.05 мс. Значения и порядок — как в make_X
+# (train.py сверяет оба пути); порядок проверяется при загрузке модели.
+FAST_ORDER = (NUMERIC + list(CATEGORIES) + ["log_revenue", "tax_burden", "bki_debt_to_revenue", "has_bki", "has_fin",
+                                            "product_type", "log_amount", "amount_to_revenue", "collateral_ratio", "dsr"])
+CAT_INDEX = {col: {v: i for i, v in enumerate(cats)} for col, cats in CATEGORIES.items()}
+CAT_INDEX["product_type"] = {p: i for i, p in enumerate(PRODUCT_TYPES)}
+COMPANY_NUMERIC = NUMERIC[:16]                               # без amount, term_months, rate, collateral_value
+
+
+def _num(v):
+    return np.nan if v is None else float(v)                 # null → NaN, true/false → 1/0
+
+
+def _code(col, v):
+    return float(CAT_INDEX[col].get(v, np.nan)) if v is not None else np.nan
+
+
+def features_np(company: dict, offers: list) -> np.ndarray:
+    """Признаки для модели: строка на каждое предложение одной компании."""
+    n = len(offers)
+    X = np.empty((n, len(FAST_ORDER)))
+    X[:, :16] = [_num(company[k]) for k in COMPANY_NUMERIC]
+    a = np.array([o["amount"] for o in offers], dtype=float)
+    t = np.array([o["term_months"] for o in offers], dtype=float)
+    r = np.array([o["rate"] for o in offers], dtype=float)
+    c = np.array([o["collateral_value"] for o in offers], dtype=float)
+    X[:, 16], X[:, 17], X[:, 18], X[:, 19] = a, t, r, c
+    X[:, 20] = _code("legal_form", company["legal_form"])
+    X[:, 21] = _code("okved_section", company["okved_section"])
+    X[:, 22] = _code("msp_category", company["msp_category"])
+    X[:, 23] = [_code("collateral_type", o["collateral_type"]) for o in offers]
+    X[:, 24] = [_code("collateral_subtype", o["collateral_subtype"]) for o in offers]
+    rev, taxes, bki, margin = X[0, 1], X[0, 7], X[0, 14], X[0, 3]
+    X[:, 25] = np.log(rev)
+    X[:, 26] = taxes / rev
+    X[:, 27] = bki / rev
+    X[:, 28] = float(not np.isnan(bki))
+    X[:, 29] = float(not np.isnan(margin))
+    X[:, 30] = [_code("product_type", o["product_type"]) for o in offers]
+    r_m = r / 1200
+    X[:, 31] = np.log(a)
+    X[:, 32] = a / rev
+    X[:, 33] = c / a
+    payment = a * r_m / (1 - (1 + r_m) ** (-t))
+    X[:, 34] = payment * np.minimum(12, t) / rev
+    return X
+
+
+def reject_np(company: dict, offers: list) -> np.ndarray:
+    """reject_mask для одной компании без pandas."""
+    age, rev = company["company_age_months"], float(company["revenue_last_year"])
+    always = bool(company["accounts_blocked_flag"]) or bool(company["bankruptcy_flag"]) or age < 3   # 1–3
+    gov_bad = company["tax_arrears_amount"] > 50_000 or company["okved_section"] not in GOV_OKVED   # 5–6
+    return np.array([always or (age < 12 and o["product_type"] in MIN_AGE_PRODUCTS)                 # 4
+                     or (o["product_type"] == "GOV_1764" and gov_bad)
+                     or (o["product_type"] == "FACTORING" and rev < 20_000_000)                     # 7
+                     or o["amount"] > rev for o in offers])                                          # 8
+
+
 def monotone_constraints(columns) -> list:
     return [MONOTONE.get(c, 0) for c in columns]
 
 
 def load() -> lgb.Booster:
-    return lgb.Booster(model_file=str(ARTIFACTS / "approval.txt"))
+    model = lgb.Booster(model_file=str(ARTIFACTS / "approval.txt"))
+    assert model.feature_name() == FAST_ORDER, "порядок признаков модели и features_np разошёлся"
+    return model
 
 
 def predict_rows(model, company: dict, offers: list) -> np.ndarray:
     """Шанс одобрения для нескольких предложений одной компании — одним вызовом модели."""
-    rows = pd.DataFrame([{**company, **o} for o in offers])
-    p = model.predict(make_X(rows), num_threads=1)  # один поток: не мешает параллельным запросам
-    return np.where(reject_mask(rows), 0.0, p)
+    p = model.predict(features_np(company, offers), num_threads=1)  # один поток: не мешает параллельным запросам
+    return np.where(reject_np(company, offers), 0.0, p)
 
 
 def approval_probability(model, company: dict, offer: dict) -> float:
@@ -110,9 +171,8 @@ def round2_grid(lo, hi):
     return out
 
 
-def candidates(company: dict, offer: dict) -> list:
-    """Предложения того же продукта: сумма ≤ исходной, любой допустимый срок, залог ≤ исходного
-    (того же вида; без залога — вид null), ставка та же."""
+def search_space(company: dict, offer: dict):
+    """Суммы (по возрастанию, ≤ исходной), сроки и залоги (≤ исходного) для поиска альтернативы."""
     p, a0, c0 = offer["product_type"], offer["amount"], offer["collateral_value"]
     cat = CATALOG[p]
     terms = [t for t in cat["terms"]
@@ -121,17 +181,25 @@ def candidates(company: dict, offer: dict) -> list:
     colls = sorted({int(round(c0 * s)) for s in COLL_STEPS}) if c0 > 0 else [0]
     if cat["collateral"] == "secured":
         colls = [c for c in colls if c > 0]
-    out = []
-    for a in amounts:
-        for t in terms:
-            for c in colls:
-                if cat["collateral"] == "secured" and a > SECURED_MAX_LTV * c:
-                    continue
-                kind = {"collateral_type": offer["collateral_type"] if c else None,
-                        "collateral_subtype": offer["collateral_subtype"] if c else None}
-                out.append({"product_type": p, "amount": a, "term_months": t, "rate": offer["rate"],
-                            "collateral_value": c, **kind})
-    return out
+    return amounts, terms, colls
+
+
+def make_offer(offer: dict, a, t, c) -> dict:
+    """Вариант исходного предложения: тот же продукт и ставка, вид залога — исходный (без залога — null)."""
+    return {"product_type": offer["product_type"], "amount": a, "term_months": t, "rate": offer["rate"],
+            "collateral_value": c, "collateral_type": offer["collateral_type"] if c else None,
+            "collateral_subtype": offer["collateral_subtype"] if c else None}
+
+
+def max_amount(offer: dict, c) -> float:
+    """У SECURED_RE сумма ограничена залогом (LTV); у остальных — только исходной суммой."""
+    return SECURED_MAX_LTV * c if CATALOG[offer["product_type"]]["collateral"] == "secured" else np.inf
+
+
+def candidates(company: dict, offer: dict) -> list:
+    """Все варианты (полный перебор) — для проверки быстрого поиска в train.py."""
+    amounts, terms, colls = search_space(company, offer)
+    return [make_offer(offer, a, t, c) for a in amounts for t in terms for c in colls if a <= max_amount(offer, c)]
 
 
 def likelyhood(offer: dict, source: dict) -> float:
@@ -147,15 +215,30 @@ def find_alternative(model, company: dict, offer: dict, gamma: float) -> dict:
     if p0 > gamma:
         return {"source_approval_probability": p0, "offer": offer, "likelyhood": 1.0, "approval_probability": p0}
 
-    cands = candidates(company, offer)
-    probs = predict_rows(model, company, cands)
+    # Шанс не растёт с суммой (монотонность модели, правило 8), а похожесть падает с удалением от исходной суммы.
+    # Значит, для каждой пары (срок, залог) лучший вариант — наибольшая сумма с шансом > gamma: ищем её бинарным
+    # поиском сразу для всех пар (≈ 7 шагов по ≤ 25 вариантов вместо перебора сотен). Результат — как у перебора.
+    amounts, terms, colls = search_space(company, offer)
+    pairs = [(t, c) for t in terms for c in colls]
+    lo = np.full(len(pairs), -1)                                         # индекс наибольшей проходящей суммы
+    hi = np.array([np.searchsorted(amounts, max_amount(offer, c), side="right") - 1 for _, c in pairs])
+    passed_p = {}
+    while (todo := np.flatnonzero(lo < hi)).size:
+        mid = (lo[todo] + hi[todo] + 1) // 2
+        probs = predict_rows(model, company, [make_offer(offer, amounts[m], *pairs[k]) for k, m in zip(todo, mid)])
+        for k, m, p in zip(todo, mid, probs):
+            p = round(float(p), 4)
+            if p > gamma:
+                lo[k] = m
+                passed_p[k, m] = p
+            else:
+                hi[k] = m - 1
     best = None
-    for o, p in zip(cands, probs):
-        p = round(float(p), 4)
-        if p > gamma:
-            key = (likelyhood(o, offer), p)  # самое похожее, при равенстве — с большим шансом
-            if best is None or key > best[0]:
-                best = (key, o, p)
+    for k in np.flatnonzero(lo >= 0):
+        o, p = make_offer(offer, amounts[lo[k]], *pairs[k]), passed_p[k, lo[k]]
+        key = (likelyhood(o, offer), p)  # самое похожее, при равенстве — с большим шансом
+        if best is None or key > best[0]:
+            best = (key, o, p)
     if best is None:
         return {"source_approval_probability": p0, "offer": None, "likelyhood": None, "approval_probability": None}
     (lk, _), o, p = best
