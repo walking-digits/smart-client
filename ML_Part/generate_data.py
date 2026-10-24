@@ -14,6 +14,8 @@
       3% обращений просят сумму в 5–50 раз больше типичной — такие почти всегда отклоняются;
     * залог (v1.7): весит сильнее, плато после полного покрытия, снимает часть штрафа за крупную сумму;
     * лимит кредитования (v1.7): сумма больше годовой выручки — почти всегда отказ;
+    * политика ступенями (v1.11): экспресс-зона, беззалоговый лимит, залог на превышение, DSR ступенями;
+    * лимит и залог (v1.10): лимит кредитования = выручка + ликвидный залог; полное покрытие снимает штраф за сумму;
     * маленькие суммы (v1.9): сумма меньше 5% выручки — бонус к одобрению (T24), у надёжной компании ≈ 100%;
     * история (v1.8): 24 месяца, признаки компании меняются помесячно (риск-события, годовая отчётность,
       экономический цикл и отрасли); в заявке — признаки на месяц подачи; срезы — company_snapshots.csv.gz.
@@ -47,7 +49,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-GENERATOR_VERSION = "1.9"
+GENERATOR_VERSION = "1.11"
 
 # --------------------------------------------------------------------------- #
 # Справочники
@@ -150,7 +152,7 @@ SECURED_RE_MAX_LTV = 0.70          # amount ≤ 70% стоимости зало�
 #   уменьшает до COLL_SIZE_RELIEF при полном покрытии.
 COLLATERAL_COEF = 2.0
 COLL_COVER_CAP = 1.2
-COLL_SIZE_RELIEF = 0.5
+COLL_SIZE_RELIEF = 1.0   # v1.10: 0.5 → 1 — полное покрытие снимает штраф за крупную сумму целиком
 # Ставка: rate = BASE_RATE × exp(RATE_SIGMA·N(0,1) − RATE_RISK_COEF·z_quality), clip 0.6…1.6 × BASE_RATE.
 # z_quality — стандартизованная «надёжность» компании (сумма вкладов T1–T13): надёжным ставка ниже.
 RATE_SIGMA = 0.12
@@ -185,8 +187,26 @@ AMOUNT_CLIP_HI = 6.0
 # v1.6: неподъёмные заявки — доля обращений, где просят сумму в UNREAL_MULT раз больше типичной
 # (в пределах каталога). Без них модель не видит этой области и не может дать там шанс ≈ 0.
 UNREAL_P = 0.03
-# v1.7: лимит кредитования — сумма не больше годовой выручки. Сверх — ступенька и крутой штраф (T23), залог
-# и длинный срок его не снимают: кредит больше годового оборота малому бизнесу не выдают.
+# v1.11: кредитная политика ступенями (вместо плавных T14, T18, T19, T24) — как в банке, шанс от суммы — лестница:
+#   экспресс-зона: сумма ≤ EXPRESS выручки → +EXPRESS_BONUS (≤ MICRO_SHARE — ещё +MICRO_BONUS), только при чистой
+#     истории: нет просрочки 30+, налогового долга > 50 тыс., долгов у приставов и пометок реестра;
+#   сверх беззалогового лимита (UNSECURED выручки) нужен залог на превышение: без него OVER_UNSECURED,
+#     с частичным покрытием превышения — пропорционально, с полным — OVER_UNSECURED + COVER_RELIEF;
+#   полное покрытие суммы ликвидным залогом → +FULL_COVER_BONUS;
+#   долговая нагрузка (DSR) ступенями DSR_STEPS.
+# Пороги — (micro, small/medium).
+EXPRESS = (0.10, 0.15)
+UNSECURED = (0.30, 0.40)
+EXPRESS_BONUS = 2.5
+MICRO_SHARE = 0.03      # совсем маленькая сумма (≤ 3% выручки) — ещё ступень вверх: почти автоматическое одобрение
+MICRO_BONUS = 1.5
+OVER_UNSECURED = -3.5
+COVER_RELIEF = 3.0
+FULL_COVER_BONUS = 0.5
+DSR_STEPS = [(0.3, 0.0), (0.5, -1.0), (0.7, -2.5), (1.0, -4.0)]   # DSR ≤ порога → вклад; выше 1 → DSR_OVER
+DSR_OVER = -8.0
+# v1.7: лимит кредитования — ступенька и крутой штраф (T23) сверх лимита. v1.10: лимит = выручка + ликвидная
+# стоимость залога (стоимость × доля по виду): без залога — не больше выручки, под залог — больше.
 REV_LIMIT_STEP = -8.0
 REV_LIMIT_COEF = -6.0
 UNREAL_MULT = (5.0, 50.0)
@@ -961,23 +981,33 @@ def generate_applications(rng, comp, H):
 
     dsr_on = np.isin(prod, [P[p] for p in DSR_PRODUCTS])
 
+    # Экспресс-одобрение маленьких сумм — только при чистой истории (как в банке)
+    dpd_c = col(c, "bki_max_dpd_12m")
+    clean = ((np.nan_to_num(dpd_c) < 30) & (col(c, "tax_arrears_amount") <= 50_000)
+             & (col(c, "fssp_open_amount") == 0) & (col(c, "registry_risk_flag") == 0))
+
     def offer_score(idx, amt, trm, coll):
-        """T14, T16–T19 для обращений idx с параметрами заявки amt, trm, coll."""
+        """Кредитная политика (v1.11, ступени) + T16 срок, T17 ставка, T23 лимит для обращений idx."""
         r_m = rate[idx] / 1200
         payment = amt * r_m / (1 - (1 + r_m) ** (-trm.astype(float)))
-        dsr = payment * np.minimum(12, trm) / rev_r[idx]                   # долговая нагрузка (DSR)
-        cover = coll * sub_share[idx] / amt                                 # покрытие залогом после дисконта
-        size = np.clip(np.log(amt / typical[idx]), AMOUNT_CLIP_LO, AMOUNT_CLIP_HI)
-        size = np.where(size > 0, size * (1 - COLL_SIZE_RELIEF * np.minimum(cover, 1.0)), size)
-        return (AMOUNT_COEF * size                                                              # T14: сумма
+        rev = rev_r[idx]
+        dsr = payment * np.minimum(12, trm) / rev                          # долговая нагрузка (DSR)
+        liquid = coll * sub_share[idx]                                      # залог после дисконта
+        limit = rev + liquid                                                # лимит = выручка + ликвидный залог
+        small = ~micro[idx]
+        share = amt / rev
+        express = share <= np.where(small, EXPRESS[1], EXPRESS[0])
+        excess = np.maximum(0.0, amt - np.where(small, UNSECURED[1], UNSECURED[0]) * rev)
+        over = np.where(excess > 0, OVER_UNSECURED + COVER_RELIEF * np.minimum(1.0, liquid / np.maximum(excess, 1)), 0.0)
+        dsr_step = np.select([dsr <= t for t, _ in DSR_STEPS], [v for _, v in DSR_STEPS], DSR_OVER) * dsr_on[idx]
+        return ((EXPRESS_BONUS * express + MICRO_BONUS * (share <= MICRO_SHARE)) * clean[idx]   # экспресс / микро-сумма
+                + over                                                                          # сверх беззалогового лимита
+                + FULL_COVER_BONUS * (liquid >= amt)                                            # полное покрытие
+                + dsr_step                                                                      # нагрузка ступенями
                 + TERM_COEF * np.clip(np.log(trm / BASE_TERM[prod[idx]]), -1.5, 1.5)            # T16: срок
                 + RATE_COEF * np.clip(np.log(rate[idx] / base_rate[idx]), -0.5, 0.5)            # T17: ставка
-                + DSR_COEF * np.clip(dsr - DSR_FREE, 0, DSR_CLIP_HI) * dsr_on[idx]              # T18: нагрузка
-                + DSR_HARD_COEF * np.clip(dsr - DSR_HARD, 0, DSR_CLIP_HI) * dsr_on[idx]         # T18: > выручки
-                + COLLATERAL_COEF * np.minimum(cover, COLL_COVER_CAP)                           # T19: залог
-                + REV_LIMIT_STEP * (amt > rev_r[idx])                                           # T23: сумма > выручки
-                + REV_LIMIT_COEF * np.clip(np.log(amt / rev_r[idx]), 0, 5)
-                + np.minimum(SMALL_MAX, SMALL_COEF * np.maximum(0, np.log(SMALL_SHARE * rev_r[idx] / amt))))  # T24
+                + REV_LIMIT_STEP * (amt > limit)                                                # T23: сумма > лимита
+                + REV_LIMIT_COEF * np.clip(np.log(amt / limit), 0, 5))
 
     # ---- Первая попытка и калибровка b_p (цели одобрения — по первым попыткам) ----
     need_score = np.sum(T_company, axis=0) + rng.normal(0, NOISE_NEED_SIGMA, nr)       # T15: общий шум

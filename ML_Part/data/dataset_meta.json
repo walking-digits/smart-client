@@ -1,8 +1,8 @@
 {
   "seed": 42,
-  "generator_version": "1.9",
+  "generator_version": "1.11",
   "n_companies": 150000,
-  "n_rows": 1021454,
+  "n_rows": 1026296,
   "columns": [
     "application_id",
     "application_date",
@@ -35,8 +35,8 @@
     "collateral_subtype",
     "approved"
   ],
-  "n_rows_ie": 585783,
-  "n_rows_llc": 435671,
+  "n_rows_ie": 592837,
+  "n_rows_llc": 433459,
   "columns_ie": [
     "application_id",
     "application_date",
@@ -72,61 +72,61 @@
   "n_needs": 809600,
   "n_rows_by_attempt": {
     "1": 809600,
-    "2": 174681,
-    "3": 37173
+    "2": 174671,
+    "3": 42025
   },
   "approval_rate_by_product": {
-    "OVERDRAFT": 0.5769,
-    "BUSINESS_CARD": 0.6486,
-    "EXPRESS_UNSECURED": 0.5013,
-    "WORKING_CAPITAL": 0.5325,
-    "CREDIT_LINE_REV": 0.4979,
-    "LEASING": 0.6138,
-    "INVESTMENT": 0.4146,
-    "SECURED_RE": 0.4425,
-    "GOV_1764": 0.385,
-    "FACTORING": 0.5656
+    "OVERDRAFT": 0.5437,
+    "BUSINESS_CARD": 0.6397,
+    "EXPRESS_UNSECURED": 0.4721,
+    "WORKING_CAPITAL": 0.5178,
+    "CREDIT_LINE_REV": 0.4845,
+    "LEASING": 0.5993,
+    "INVESTMENT": 0.4241,
+    "SECURED_RE": 0.4492,
+    "GOV_1764": 0.3723,
+    "FACTORING": 0.5657
   },
   "approval_rate_first_attempt_by_product": {
-    "OVERDRAFT": 0.6199,
-    "BUSINESS_CARD": 0.6994,
-    "EXPRESS_UNSECURED": 0.5507,
+    "OVERDRAFT": 0.6196,
+    "BUSINESS_CARD": 0.6999,
+    "EXPRESS_UNSECURED": 0.5496,
     "WORKING_CAPITAL": 0.5799,
-    "CREDIT_LINE_REV": 0.5514,
+    "CREDIT_LINE_REV": 0.5538,
     "LEASING": 0.68,
-    "INVESTMENT": 0.4516,
-    "SECURED_RE": 0.4992,
-    "GOV_1764": 0.4199,
-    "FACTORING": 0.6702
+    "INVESTMENT": 0.4533,
+    "SECURED_RE": 0.4982,
+    "GOV_1764": 0.4181,
+    "FACTORING": 0.6719
   },
   "collateral_type_share": {
-    "REAL_ESTATE": 0.5208,
-    "INVENTORY": 0.1486,
-    "VEHICLES": 0.1435,
-    "EQUIPMENT": 0.1071,
-    "FINANCIAL": 0.08
+    "REAL_ESTATE": 0.5197,
+    "INVENTORY": 0.1491,
+    "VEHICLES": 0.1439,
+    "EQUIPMENT": 0.1062,
+    "FINANCIAL": 0.0812
   },
   "collateral_subtype_share": {
-    "APARTMENT": 0.1124,
-    "GOODS": 0.1075,
-    "RETAIL_SPACE": 0.0881,
-    "OFFICE": 0.0881,
-    "WAREHOUSE": 0.0826,
-    "CAR": 0.0679,
-    "PRODUCTION_EQUIPMENT": 0.0586,
-    "HOUSE": 0.0585,
-    "TRADE_EQUIPMENT": 0.0485,
+    "APARTMENT": 0.1128,
+    "GOODS": 0.1077,
+    "OFFICE": 0.0878,
+    "RETAIL_SPACE": 0.0876,
+    "WAREHOUSE": 0.0824,
+    "CAR": 0.0687,
+    "HOUSE": 0.0583,
+    "PRODUCTION_EQUIPMENT": 0.0583,
+    "TRADE_EQUIPMENT": 0.0479,
     "TRUCK": 0.0465,
-    "LAND": 0.0456,
-    "INDUSTRIAL_BUILDING": 0.0454,
-    "RAW_MATERIALS": 0.0411,
-    "DEPOSIT": 0.0358,
-    "SPECIAL_MACHINERY": 0.0291,
-    "RECEIVABLES": 0.0267,
-    "BONDS": 0.0107,
-    "SHARES": 0.0067
+    "LAND": 0.0457,
+    "INDUSTRIAL_BUILDING": 0.045,
+    "RAW_MATERIALS": 0.0413,
+    "DEPOSIT": 0.0366,
+    "SPECIAL_MACHINERY": 0.0287,
+    "RECEIVABLES": 0.0269,
+    "BONDS": 0.0109,
+    "SHARES": 0.0068
   },
-  "approval_rate_retry": 0.3382,
+  "approval_rate_retry": 0.2602,
   "approval_target_spec": {
     "OVERDRAFT": 0.62,
     "BUSINESS_CARD": 0.7,
@@ -164,17 +164,17 @@
     "FACTORING": 0.7465
   },
   "intercept_b_p": {
-    "OVERDRAFT": 0.7765,
-    "BUSINESS_CARD": 1.3623,
-    "EXPRESS_UNSECURED": 0.9135,
-    "WORKING_CAPITAL": 0.6548,
-    "CREDIT_LINE_REV": 0.5717,
-    "LEASING": 2.0302,
-    "INVESTMENT": -0.2547,
-    "SECURED_RE": -1.6048,
-    "GOV_1764": -0.5747,
-    "FACTORING": 2.511
+    "OVERDRAFT": -0.2298,
+    "BUSINESS_CARD": 1.1947,
+    "EXPRESS_UNSECURED": 0.7532,
+    "WORKING_CAPITAL": 1.9138,
+    "CREDIT_LINE_REV": 1.1881,
+    "LEASING": 3.9455,
+    "INVESTMENT": 2.3206,
+    "SECURED_RE": 0.5243,
+    "GOV_1764": 0.4218,
+    "FACTORING": 2.6532
   },
-  "approval_rate_total": 0.5389,
-  "csv_sha256": "88b4dfed8d2034c6482ed3b40141a72c52ef68344d582386a1f0165532e833ca"
+  "approval_rate_total": 0.5214,
+  "csv_sha256": "398dae09473b84866ddc46ec652d5173a90aa00f40ff447791702769b38bcea7"
 }

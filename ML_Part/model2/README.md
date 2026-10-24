@@ -20,7 +20,7 @@ sudo docker run --rm -p 8001:8000 model2
 curl -X POST localhost:8001/approval -H "Content-Type: application/json" -d @example_approval.json
 ```
 ```json
-{"approval_probability": 0.6054}
+{"approval_probability": 0.2431}
 ```
 
 ```bash
@@ -28,11 +28,11 @@ curl -X POST localhost:8001/alternative -H "Content-Type: application/json" -d @
 ```
 ```json
 {
-  "source_approval_probability": 0.6054,
+  "source_approval_probability": 0.2431,
   "offer": {"product_type": "WORKING_CAPITAL", "amount": 31000000, "term_months": 12, "rate": 20.0,
             "collateral_value": 0, "collateral_type": null, "collateral_subtype": null},
   "likelyhood": 0.775,
-  "approval_probability": 0.7042
+  "approval_probability": 0.7789
 }
 ```
 

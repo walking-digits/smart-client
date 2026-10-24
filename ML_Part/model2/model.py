@@ -35,9 +35,12 @@ NUMERIC = [
     "amount", "term_months", "rate", "collateral_value",
 ]
 # Монотонность: −1 — признак ↑ → шанс ↓, +1 — признак ↑ → шанс ↑. Все признаки суммы — в одну сторону
-# (меньше сумма → выше шанс), залог — в другую. Срок и ставку не ограничиваем.
+# (меньше сумма → выше шанс), залог — в другую, риски клиента — вниз. Срок и ставку не ограничиваем.
 MONOTONE = {"amount": -1, "log_amount": -1, "amount_to_revenue": -1, "dsr": -1,
-            "collateral_value": +1, "collateral_ratio": +1}
+            "collateral_value": +1, "collateral_ratio": +1,
+            # риски клиента: больше просрочка / долги / иски — шанс не выше (без «зубчиков» от шума деревьев)
+            "bki_max_dpd_12m": -1, "tax_arrears_amount": -1, "fssp_open_amount": -1,
+            "arbitr_defendant_amount_12m": -1, "bki_total_debt": -1, "bki_debt_to_revenue": -1}
 
 
 def make_X(rows: pd.DataFrame) -> pd.DataFrame:
@@ -65,6 +68,17 @@ def make_X(rows: pd.DataFrame) -> pd.DataFrame:
 # Формальные признаки отказа (REJECT_RULES.md): такие заявки получают шанс 0, модель на них не учится
 GOV_OKVED = set("ACDEFHIJQS")
 MIN_AGE_PRODUCTS = {"INVESTMENT", "SECURED_RE", "CREDIT_LINE_REV", "GOV_1764"}
+# Доля стоимости залога, которую банк засчитывает (1 − залоговый дисконт) — для лимита кредитования (правило 8)
+COLL_SHARE = {"APARTMENT": 0.80, "HOUSE": 0.70, "OFFICE": 0.70, "RETAIL_SPACE": 0.70, "WAREHOUSE": 0.65,
+              "INDUSTRIAL_BUILDING": 0.60, "LAND": 0.55, "CAR": 0.65, "TRUCK": 0.60, "SPECIAL_MACHINERY": 0.55,
+              "PRODUCTION_EQUIPMENT": 0.55, "TRADE_EQUIPMENT": 0.50, "GOODS": 0.50, "RAW_MATERIALS": 0.45,
+              "DEPOSIT": 0.95, "BONDS": 0.80, "SHARES": 0.60, "RECEIVABLES": 0.55}
+
+
+def dsr(amount, term, rate, revenue):
+    """Платежи за год по аннуитету / выручка."""
+    r_m = rate / 1200
+    return amount * r_m / (1 - (1 + r_m) ** (-term)) * np.minimum(12, term) / revenue
 
 
 def reject_mask(rows: pd.DataFrame) -> np.ndarray:
@@ -73,6 +87,9 @@ def reject_mask(rows: pd.DataFrame) -> np.ndarray:
     age = rows["company_age_months"]
     rev = rows["revenue_last_year"].astype(float)
     gov = p == "GOV_1764"
+    amount = rows["amount"].astype(float)
+    liquid = rows["collateral_value"].astype(float) * rows["collateral_subtype"].map(COLL_SHARE).fillna(0.0)
+    pay = dsr(amount, rows["term_months"].astype(float), rows["rate"].astype(float), rev)
     return (rows["accounts_blocked_flag"].astype(bool)                                     # 1
             | rows["bankruptcy_flag"].astype(bool)                                         # 2
             | (age < 3)                                                                    # 3
@@ -80,7 +97,8 @@ def reject_mask(rows: pd.DataFrame) -> np.ndarray:
             | (gov & (rows["tax_arrears_amount"] > 50_000))                                # 5
             | (gov & ~rows["okved_section"].isin(GOV_OKVED))                               # 6
             | ((p == "FACTORING") & (rev < 20_000_000))                                    # 7
-            | (rows["amount"].astype(float) > rev)).to_numpy()                             # 8
+            | (amount > rev + liquid)                                                       # 8
+            | ((p != "FACTORING") & (pay > 1))).to_numpy()                                 # 9
 
 
 # ---- Быстрый путь для сервиса: признаки сразу в numpy, без pandas ----
@@ -133,14 +151,16 @@ def features_np(company: dict, offers: list) -> np.ndarray:
 
 
 def reject_np(company: dict, offers: list) -> np.ndarray:
-    """reject_mask для одной компании без pandas."""
+    """reject_mask для одной компании без pandas (правила 8–9 — на каждое предложение)."""
     age, rev = company["company_age_months"], float(company["revenue_last_year"])
     always = bool(company["accounts_blocked_flag"]) or bool(company["bankruptcy_flag"]) or age < 3   # 1–3
     gov_bad = company["tax_arrears_amount"] > 50_000 or company["okved_section"] not in GOV_OKVED   # 5–6
     return np.array([always or (age < 12 and o["product_type"] in MIN_AGE_PRODUCTS)                 # 4
                      or (o["product_type"] == "GOV_1764" and gov_bad)
                      or (o["product_type"] == "FACTORING" and rev < 20_000_000)                     # 7
-                     or o["amount"] > rev for o in offers])                                          # 8
+                     or o["amount"] > rev + o["collateral_value"] * COLL_SHARE.get(o["collateral_subtype"], 0.0)  # 8
+                     or (o["product_type"] != "FACTORING"
+                         and dsr(o["amount"], o["term_months"], o["rate"], rev) > 1) for o in offers])  # 9
 
 
 def monotone_constraints(columns) -> list:

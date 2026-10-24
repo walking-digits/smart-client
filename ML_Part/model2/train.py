@@ -38,6 +38,8 @@ PARAMS = {
     "verbose": -1,
 }
 N_FOLDS = 5
+FAST = "--fast" in sys.argv       # python train.py --fast — быстрое обучение для проверки идей
+FAST_ROWS = 300_000
 # Неподъёмные заявки — платежи за год больше выручки (DSR > 1) — вес ×10: иначе ранняя остановка обрывает
 # обучение, пока шанс там ≈ 0.3%, хотя в данных такие заявки не одобряют. Вес одинаков внутри группы —
 # калибровка не сдвигается. Сумма больше выручки — формальный отказ (правило 8), в обучение не идёт.
@@ -49,6 +51,21 @@ def train(df):
     X, y, groups = make_X(df), df["approved"].to_numpy(dtype=float), df["inn"]
     w = np.where(X["dsr"].to_numpy() > UNREAL_DSR, UNREAL_WEIGHT, 1.0)
     params = {**PARAMS, "monotone_constraints": monotone_constraints(X.columns)}
+
+    if FAST:  # одна отложенная выборка (20% компаний), шаг 0.1, обучение на подвыборке — ≈ 1 мин вместо 3–4
+        params = {**params, "learning_rate": 0.1}
+        va_mask = (pd.util.hash_pandas_object(groups, index=False) % 5 == 0).to_numpy()  # детерминированно по ИНН
+        tr = np.flatnonzero(~va_mask)
+        tr = np.random.default_rng(0).choice(tr, min(len(tr), FAST_ROWS), replace=False)
+        va = np.flatnonzero(va_mask)
+        m = lgb.train(params, lgb.Dataset(X.iloc[tr], y[tr], weight=w[tr]), num_boost_round=3000,
+                      valid_sets=[lgb.Dataset(X.iloc[va], y[va], weight=w[va])],
+                      callbacks=[lgb.early_stopping(50, verbose=False)])
+        p = m.predict(X.iloc[va], num_iteration=m.best_iteration)
+        print(f"approval (быстрый режим): AUC {roc_auc_score(y[va], p):.3f}, logloss {log_loss(y[va], p):.4f}, "
+              f"деревьев {m.best_iteration}")
+        m.save_model(str(ARTIFACTS / "approval.txt"), num_iteration=m.best_iteration)
+        return
 
     oof, rounds = np.zeros(len(y)), []
     for tr, va in GroupKFold(N_FOLDS).split(X, y, groups):
